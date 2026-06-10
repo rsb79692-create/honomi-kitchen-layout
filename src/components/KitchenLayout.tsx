@@ -46,6 +46,10 @@ export default function KitchenLayout() {
     setEquipments(equipments.map((e) => e.id === updated.id ? updated : e));
   }, [equipments, setEquipments]);
 
+  const handleResize = useCallback((id: string, width: number, depth: number) => {
+    setEquipments(equipments.map((e) => e.id === id ? { ...e, width, depth } : e));
+  }, [equipments, setEquipments]);
+
   const handleDelete = useCallback((id: string) => {
     setEquipments(equipments.filter((e) => e.id !== id));
     setSelectedId(null);
@@ -109,6 +113,7 @@ export default function KitchenLayout() {
                 canvasScale={CANVAS_SCALE}
                 onSelect={setSelectedId}
                 onMove={handleMove}
+                onResize={handleResize}
               />
             ))}
           </div>
