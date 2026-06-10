@@ -14,7 +14,7 @@ export default function PdfBackground({ onSizeReady }: Props) {
     const run = async () => {
       try {
         const pdfjs = await import('pdfjs-dist');
-        pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+        pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
         const pdf = await pdfjs.getDocument({ url: '/floor-plan.pdf' }).promise;
         const page = await pdf.getPage(1);
@@ -24,11 +24,12 @@ export default function PdfBackground({ onSizeReady }: Props) {
           const canvas = canvasRef.current;
           canvas.width = viewport.width;
           canvas.height = viewport.height;
-          await page.render({ canvasContext: canvas.getContext('2d')!, viewport, canvas }).promise;
+          await page.render({ canvas, viewport }).promise;
           onSizeReady(viewport.width, viewport.height);
         }
-      } catch {
-        if (!cancelled) setError('PDF読み込みエラー');
+      } catch (err) {
+        console.error('[PdfBackground] error:', err);
+        if (!cancelled) setError('PDF読み込みエラー: ' + String(err));
       }
     };
     run();
