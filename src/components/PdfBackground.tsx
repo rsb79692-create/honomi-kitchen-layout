@@ -3,9 +3,10 @@ import { useEffect, useRef, useState } from 'react';
 
 interface Props {
   onSizeReady: (width: number, height: number) => void;
+  visible: boolean;
 }
 
-export default function PdfBackground({ onSizeReady }: Props) {
+export default function PdfBackground({ onSizeReady, visible }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,7 +43,7 @@ export default function PdfBackground({ onSizeReady }: Props) {
   return (
     <canvas
       ref={canvasRef}
-      style={{ display: 'block', position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
+      style={{ display: 'block', position: 'absolute', top: 0, left: 0, pointerEvents: 'none', visibility: visible ? 'visible' : 'hidden' }}
     />
   );
 }

@@ -16,6 +16,7 @@ const CANVAS_SCALE = 1.0;
 
 export default function KitchenLayout() {
   const [equipments, setEquipments] = useLocalStorage<Equipment[]>('kitchen-equipments', []);
+  const [showPdf, setShowPdf] = useLocalStorage<boolean>('kitchen-show-pdf', true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pdfSize, setPdfSize] = useState<{ w: number; h: number } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -75,6 +76,15 @@ export default function KitchenLayout() {
       {/* Header */}
       <div style={{ background: '#222', color: '#fff', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
         <span style={{ fontWeight: 700, fontSize: 15 }}>厨房レイアウト</span>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#ddd', cursor: 'pointer', userSelect: 'none' }}>
+          <input
+            type="checkbox"
+            checked={showPdf}
+            onChange={(e) => setShowPdf(e.target.checked)}
+            style={{ width: 15, height: 15, cursor: 'pointer', accentColor: '#3b82f6' }}
+          />
+          厨房図面を表示
+        </label>
         <span style={{ flex: 1 }} />
         <button
           onClick={handleExport}
@@ -101,10 +111,10 @@ export default function KitchenLayout() {
         >
           <div
             ref={canvasRef}
-            style={{ position: 'relative', width: canvasW, height: canvasH, flexShrink: 0, background: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}
+            style={{ position: 'relative', width: canvasW, height: canvasH, flexShrink: 0, background: '#fff', border: '2px solid #888', boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}
             onClick={(e) => e.stopPropagation()}
           >
-            <PdfBackground onSizeReady={(w, h) => setPdfSize({ w, h })} />
+            <PdfBackground onSizeReady={(w, h) => setPdfSize({ w, h })} visible={showPdf} />
             {equipments.map((eq) => (
               <EquipmentItem
                 key={eq.id}
