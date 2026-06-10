@@ -5,7 +5,6 @@ import type { Equipment, EquipmentType } from '@/types/equipment';
 import type { KitchenLine } from '@/types/kitchenLine';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import EquipmentItem from './EquipmentItem';
-import KitchenOutline from './KitchenOutline';
 import KitchenLineEditor from './KitchenLineEditor';
 import LeftPanel from './LeftPanel';
 import RightPanel from './RightPanel';
@@ -331,11 +330,10 @@ export default function KitchenLayout() {
         >
           <div
             ref={canvasRef}
-            style={{ position: 'relative', width: canvasW, height: canvasH, flexShrink: 0, background: '#fff', border: '2px solid #888', boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}
+            style={{ position: 'relative', width: canvasW, height: canvasH, flexShrink: 0, background: '#fff' }}
             onClick={(e) => e.stopPropagation()}
           >
             <PdfBackground onSizeReady={(w, h) => setPdfSize({ w, h })} visible={showPdf} />
-            <KitchenOutline width={canvasW} height={canvasH} />
             <KitchenLineEditor
               lines={kitchenLines}
               width={canvasW}
