@@ -11,11 +11,14 @@ export function useLocalStorage<T>(key: string, initialValue: T) {
     } catch {}
   }, [key]);
 
-  const setStoredValue = (newValue: T) => {
-    setValue(newValue);
-    try {
-      localStorage.setItem(key, JSON.stringify(newValue));
-    } catch {}
+  const setStoredValue = (newValue: T | ((prev: T) => T)) => {
+    setValue((prev) => {
+      const next = typeof newValue === 'function' ? (newValue as (p: T) => T)(prev) : newValue;
+      try {
+        localStorage.setItem(key, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
   };
 
   return [value, setStoredValue] as const;

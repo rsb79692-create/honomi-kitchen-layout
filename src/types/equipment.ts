@@ -19,4 +19,5 @@ export interface Equipment {
   depth: number;
   rotation: 0 | 90;
   memo: string;
+  groupId?: string;
 }

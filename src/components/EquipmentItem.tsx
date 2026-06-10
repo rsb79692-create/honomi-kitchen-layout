@@ -2,7 +2,6 @@
 import { useRef } from 'react';
 import type { Equipment } from '@/types/equipment';
 
-// 1px = 1cm (adjust here to calibrate display scale)
 export const SCALE_CM_PER_PX = 1;
 
 const MIN_CM = 30;
@@ -11,13 +10,19 @@ const HANDLE_SIZE = 8;
 interface Props {
   equipment: Equipment;
   isSelected: boolean;
+  showResizeHandles: boolean;
   canvasScale: number;
-  onSelect: (id: string) => void;
+  groupMates: Array<{ id: string; x: number; y: number }>;
+  onSelectItem: (id: string, additive: boolean) => void;
   onMove: (id: string, x: number, y: number) => void;
+  onMoveMultiple: (moves: Array<{ id: string; x: number; y: number }>) => void;
   onResize: (id: string, width: number, depth: number) => void;
 }
 
-export default function EquipmentItem({ equipment, isSelected, canvasScale, onSelect, onMove, onResize }: Props) {
+export default function EquipmentItem({
+  equipment, isSelected, showResizeHandles, canvasScale,
+  groupMates, onSelectItem, onMove, onMoveMultiple, onResize,
+}: Props) {
   const moveStart = useRef<{ mouseX: number; mouseY: number; equipX: number; equipY: number } | null>(null);
   const resizeStart = useRef<{
     mouseX: number; mouseY: number;
@@ -32,28 +37,39 @@ export default function EquipmentItem({ equipment, isSelected, canvasScale, onSe
   const handleMouseDown = (e: React.MouseEvent) => {
     if (resizeStart.current) return;
     e.stopPropagation();
-    onSelect(equipment.id);
+    const additive = e.ctrlKey || e.shiftKey || e.metaKey;
+    onSelectItem(equipment.id, additive);
+
+    const matesSnapshot = groupMates.map(m => ({ ...m }));
     moveStart.current = { mouseX: e.clientX, mouseY: e.clientY, equipX: equipment.x, equipY: equipment.y };
 
-    const onMove_ = (ev: MouseEvent) => {
+    const onMoveHandler = (ev: MouseEvent) => {
       if (!moveStart.current) return;
       const dx = (ev.clientX - moveStart.current.mouseX) / canvasScale;
       const dy = (ev.clientY - moveStart.current.mouseY) / canvasScale;
-      onMove(equipment.id, moveStart.current.equipX + dx, moveStart.current.equipY + dy);
+
+      if (matesSnapshot.length > 0) {
+        onMoveMultiple([
+          { id: equipment.id, x: moveStart.current.equipX + dx, y: moveStart.current.equipY + dy },
+          ...matesSnapshot.map(m => ({ id: m.id, x: m.x + dx, y: m.y + dy })),
+        ]);
+      } else {
+        onMove(equipment.id, moveStart.current.equipX + dx, moveStart.current.equipY + dy);
+      }
     };
     const onUp = () => {
       moveStart.current = null;
-      window.removeEventListener('mousemove', onMove_);
+      window.removeEventListener('mousemove', onMoveHandler);
       window.removeEventListener('mouseup', onUp);
     };
-    window.addEventListener('mousemove', onMove_);
+    window.addEventListener('mousemove', onMoveHandler);
     window.addEventListener('mouseup', onUp);
   };
 
   const handleResizeMouseDown = (e: React.MouseEvent, dir: 'right' | 'bottom' | 'corner') => {
     e.stopPropagation();
     e.preventDefault();
-    onSelect(equipment.id);
+    onSelectItem(equipment.id, false);
     resizeStart.current = {
       mouseX: e.clientX, mouseY: e.clientY,
       width: equipment.width, depth: equipment.depth,
@@ -61,7 +77,7 @@ export default function EquipmentItem({ equipment, isSelected, canvasScale, onSe
       dir,
     };
 
-    const onMove_ = (ev: MouseEvent) => {
+    const onMoveHandler = (ev: MouseEvent) => {
       const s = resizeStart.current;
       if (!s) return;
       const dx = (ev.clientX - s.mouseX) / canvasScale;
@@ -71,7 +87,6 @@ export default function EquipmentItem({ equipment, isSelected, canvasScale, onSe
       let newDepth = s.depth;
 
       if (dir === 'right' || dir === 'corner') {
-        // right side: horizontal on screen
         if (s.rotation === 0) {
           newWidth = Math.max(MIN_CM, Math.round(s.width + dx));
         } else {
@@ -79,7 +94,6 @@ export default function EquipmentItem({ equipment, isSelected, canvasScale, onSe
         }
       }
       if (dir === 'bottom' || dir === 'corner') {
-        // bottom side: vertical on screen
         if (s.rotation === 0) {
           newDepth = Math.max(MIN_CM, Math.round(s.depth + dy));
         } else {
@@ -91,10 +105,10 @@ export default function EquipmentItem({ equipment, isSelected, canvasScale, onSe
     };
     const onUp = () => {
       resizeStart.current = null;
-      window.removeEventListener('mousemove', onMove_);
+      window.removeEventListener('mousemove', onMoveHandler);
       window.removeEventListener('mouseup', onUp);
     };
-    window.addEventListener('mousemove', onMove_);
+    window.addEventListener('mousemove', onMoveHandler);
     window.addEventListener('mouseup', onUp);
   };
 
@@ -102,6 +116,13 @@ export default function EquipmentItem({ equipment, isSelected, canvasScale, onSe
   const pxW = displayWidth * canvasScale;
   const pxH = displayHeight * canvasScale;
   const smallBox = pxW < 80 || pxH < 40;
+
+  const isGrouped = !!equipment.groupId;
+  const borderColor = isSelected ? (isGrouped ? '#f59e0b' : '#3b82f6') : '#555';
+  const borderWidth = isSelected ? '2px' : '1.5px';
+  const bgColor = isSelected
+    ? (isGrouped ? 'rgba(245,158,11,0.25)' : 'rgba(59,130,246,0.35)')
+    : 'rgba(200,200,200,0.45)';
 
   return (
     <div
@@ -116,13 +137,12 @@ export default function EquipmentItem({ equipment, isSelected, canvasScale, onSe
         userSelect: 'none',
       }}
     >
-      {/* Main body */}
       <div
         style={{
           width: '100%',
           height: '100%',
-          backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.35)' : 'rgba(200, 200, 200, 0.45)',
-          border: isSelected ? '2px solid #3b82f6' : '1.5px solid #555',
+          backgroundColor: bgColor,
+          border: `${borderWidth} solid ${borderColor}`,
           boxSizing: 'border-box',
           display: 'flex',
           flexDirection: 'column',
@@ -141,10 +161,8 @@ export default function EquipmentItem({ equipment, isSelected, canvasScale, onSe
         )}
       </div>
 
-      {/* Resize handles — shown only when selected */}
-      {isSelected && (
+      {showResizeHandles && (
         <>
-          {/* Right */}
           <div
             onMouseDown={(e) => handleResizeMouseDown(e, 'right')}
             style={{
@@ -161,7 +179,6 @@ export default function EquipmentItem({ equipment, isSelected, canvasScale, onSe
               zIndex: 10,
             }}
           />
-          {/* Bottom */}
           <div
             onMouseDown={(e) => handleResizeMouseDown(e, 'bottom')}
             style={{
@@ -178,7 +195,6 @@ export default function EquipmentItem({ equipment, isSelected, canvasScale, onSe
               zIndex: 10,
             }}
           />
-          {/* Corner (bottom-right) */}
           <div
             onMouseDown={(e) => handleResizeMouseDown(e, 'corner')}
             style={{
