@@ -5,6 +5,8 @@ import type { Equipment, EquipmentType } from '@/types/equipment';
 import type { KitchenLine } from '@/types/kitchenLine';
 import type { CropRegion } from '@/types/project';
 import { useProjects } from '@/hooks/useProjects';
+import { ASTERA_PRESET } from '@/data/presets';
+import type { KitchenPreset } from '@/data/presets';
 import EquipmentItem from './EquipmentItem';
 import KitchenLineEditor from './KitchenLineEditor';
 import LeftPanel from './LeftPanel';
@@ -53,6 +55,9 @@ export default function KitchenLayout() {
   const [rightWidth, setRightWidth] = useState(390);
   const rightWidthRef = useRef(rightWidth);
   useEffect(() => { rightWidthRef.current = rightWidth; }, [rightWidth]);
+
+  // プリセット確認ダイアログの状態
+  const [presetConfirm, setPresetConfirm] = useState<KitchenPreset | null>(null);
 
   // Reset selection when project changes
   const prevProjectId = useRef(currentProject?.id);
@@ -240,6 +245,36 @@ export default function KitchenLayout() {
     window.addEventListener('mouseup', onUp);
   }, []);
 
+  // ── プリセット適用 ────────────────────────────────────────────────────────
+  const handlePresetButtonClick = useCallback((preset: KitchenPreset) => {
+    if (equipments.length === 0) {
+      // 既存アイテムなし → 即座に配置
+      const items: Equipment[] = preset.items.map((item) => ({
+        id: genId(), type: item.type, name: item.name,
+        x: item.x, y: item.y, width: item.width, depth: item.depth,
+        rotation: item.rotation, memo: item.memo ?? '',
+      }));
+      setEquipments(items);
+    } else {
+      setPresetConfirm(preset);
+    }
+  }, [equipments.length, setEquipments]);
+
+  const applyPreset = useCallback((action: 'add' | 'replace') => {
+    if (!presetConfirm) return;
+    const items: Equipment[] = presetConfirm.items.map((item) => ({
+      id: genId(), type: item.type, name: item.name,
+      x: item.x, y: item.y, width: item.width, depth: item.depth,
+      rotation: item.rotation, memo: item.memo ?? '',
+    }));
+    if (action === 'replace') {
+      setEquipments(items);
+    } else {
+      setEquipments((prev) => [...prev, ...items]);
+    }
+    setPresetConfirm(null);
+  }, [presetConfirm, setEquipments]);
+
   // ── export ────────────────────────────────────────────────────────────────
   const handleExport = async () => {
     if (!canvasRef.current) return;
@@ -415,6 +450,16 @@ export default function KitchenLayout() {
             </button>
           </>
         )}
+
+        <div style={{ width: 1, height: 20, background: '#444', margin: '0 4px' }} />
+
+        <button
+          onClick={() => handlePresetButtonClick(ASTERA_PRESET)}
+          style={{ ...btnStyle(), fontSize: 12, padding: '4px 10px', background: '#7c3aed', borderColor: '#6d28d9', color: '#fff' }}
+          title="アステラ新築厨房の機器26点をキャンバスに配置します"
+        >
+          図面から機器を作成
+        </button>
       </div>
 
       {/* ── Header row 2: display toggles + tools ────────────────────────── */}
@@ -469,6 +514,38 @@ export default function KitchenLayout() {
         <button onClick={handleExport} style={btnStyle()}>PNG出力</button>
         <button onClick={() => window.print()} style={btnStyle()}>印刷</button>
       </div>
+
+      {/* ── プリセット確認バナー ──────────────────────────────────────────── */}
+      {presetConfirm && (
+        <div style={{
+          background: '#ede9fe', borderBottom: '1px solid #c4b5fd',
+          padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 10,
+          flexShrink: 0, fontSize: 13, color: '#3b0764', flexWrap: 'wrap',
+        }}>
+          <span>
+            既存のアイテムが {equipments.length} 個あります。
+            「{presetConfirm.label}」の {presetConfirm.items.length} 点をどう配置しますか？
+          </span>
+          <button
+            onClick={() => applyPreset('add')}
+            style={{ padding: '4px 14px', background: '#7c3aed', color: '#fff', border: '1px solid #6d28d9', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}
+          >
+            追加する
+          </button>
+          <button
+            onClick={() => applyPreset('replace')}
+            style={{ padding: '4px 14px', background: '#b91c1c', color: '#fff', border: '1px solid #991b1b', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}
+          >
+            置き換える
+          </button>
+          <button
+            onClick={() => setPresetConfirm(null)}
+            style={{ padding: '4px 14px', background: '#fff', color: '#555', border: '1px solid #bbb', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
+          >
+            キャンセル
+          </button>
+        </div>
+      )}
 
       {/* ── Outline edit toolbar ──────────────────────────────────────────── */}
       {isEditingOutline && (
