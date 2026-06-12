@@ -22,6 +22,7 @@ export interface Project {
   kitchenLines: KitchenLine[];
   showPdf: boolean;
   showEquipmentList: boolean;
+  canvasZoom: number; // 0.5 – 2.0、10% 刻み
 }
 
 export function defaultProject(): Project {
@@ -36,5 +37,6 @@ export function defaultProject(): Project {
     kitchenLines: [],
     showPdf: true,
     showEquipmentList: false,
+    canvasZoom: 1.0,
   };
 }

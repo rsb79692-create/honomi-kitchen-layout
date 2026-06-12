@@ -6,6 +6,7 @@ interface Props {
   lines: KitchenLine[];
   width: number;
   height: number;
+  zoom?: number; // display zoom factor (default 1.0)
   editMode: boolean;
   snapToGrid: boolean;
   strokeWidth: number;
@@ -32,7 +33,7 @@ let lineIdCounter = Date.now();
 const genLineId = () => String(++lineIdCounter);
 
 export default function KitchenLineEditor({
-  lines, width, height, editMode, snapToGrid,
+  lines, width, height, zoom = 1, editMode, snapToGrid,
   strokeWidth, color, selectedLineId,
   onSelectLine, onAddLine, onDeleteLine, onUpdateLine, onBeginDrag,
 }: Props) {
@@ -58,10 +59,11 @@ export default function KitchenLineEditor({
   const getSvgPos = useCallback((clientX: number, clientY: number) => {
     const rect = svgRef.current?.getBoundingClientRect();
     if (!rect) return { x: 0, y: 0 };
-    const rawX = clientX - rect.left;
-    const rawY = clientY - rect.top;
+    // Divide by zoom to convert screen pixels → base coordinate space
+    const rawX = (clientX - rect.left) / zoom;
+    const rawY = (clientY - rect.top) / zoom;
     return { x: snap(rawX, snapToGrid), y: snap(rawY, snapToGrid) };
-  }, [snapToGrid]);
+  }, [snapToGrid, zoom]);
 
   // Reset drawing state when editMode turns off
   useEffect(() => {
@@ -157,11 +159,16 @@ export default function KitchenLineEditor({
     ? (shiftHeld ? shiftSnap(drawingStart, mousePos) : mousePos)
     : null;
 
+  // viewBox fixes coordinate space to base dimensions; width/height scale it to display size
+  const baseW = width / zoom;
+  const baseH = height / zoom;
+
   return (
     <svg
       ref={svgRef}
       width={width}
       height={height}
+      viewBox={`0 0 ${baseW} ${baseH}`}
       style={{
         position: 'absolute',
         top: 0,
@@ -170,13 +177,13 @@ export default function KitchenLineEditor({
         cursor: editMode ? 'crosshair' : 'default',
       }}
     >
-      {/* Background hit area to capture clicks on empty space */}
+      {/* Background hit area — uses base coordinate space (viewBox) */}
       {editMode && (
         <rect
           x={0}
           y={0}
-          width={width}
-          height={height}
+          width={baseW}
+          height={baseH}
           fill="transparent"
           onClick={handleBgClick}
         />

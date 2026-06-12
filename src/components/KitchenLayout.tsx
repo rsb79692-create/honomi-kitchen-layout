@@ -17,9 +17,11 @@ const PdfCropModal = dynamic(() => import('./PdfCropModal'), { ssr: false });
 let idCounter = Date.now();
 const genId = () => String(++idCounter);
 
-const CANVAS_SCALE = 1.0;
-
 type CropMode = 'kitchen' | 'equipment-list' | null;
+
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 2.0;
+const ZOOM_STEP = 0.1;
 
 export default function KitchenLayout() {
   const {
@@ -32,6 +34,7 @@ export default function KitchenLayout() {
   const kitchenLines: KitchenLine[] = currentProject?.kitchenLines ?? [];
   const showPdf: boolean = currentProject?.showPdf ?? true;
   const showEquipmentList: boolean = currentProject?.showEquipmentList ?? false;
+  const canvasZoom: number = currentProject?.canvasZoom ?? 1.0;
 
   // Local UI state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -297,8 +300,17 @@ export default function KitchenLayout() {
     setCropMode(null);
   }, [updateProject]);
 
-  const canvasW = pdfSize ? pdfSize.w : 900;
-  const canvasH = pdfSize ? pdfSize.h : 700;
+  // base dimensions (PDF render size, zoom-independent)
+  const canvasBaseW = pdfSize ? pdfSize.w : 900;
+  const canvasBaseH = pdfSize ? pdfSize.h : 700;
+  // display dimensions (base × zoom)
+  const canvasW = Math.round(canvasBaseW * canvasZoom);
+  const canvasH = Math.round(canvasBaseH * canvasZoom);
+
+  const setCanvasZoom = useCallback((next: number) => {
+    const clamped = Math.round(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next)) * 10) / 10;
+    updateProject({ canvasZoom: clamped });
+  }, [updateProject]);
 
   const btnStyle = (active = false, accent = '#444'): React.CSSProperties => ({
     padding: '5px 12px', background: active ? accent : '#444',
@@ -426,6 +438,34 @@ export default function KitchenLayout() {
         >
           厨房枠編集{isEditingOutline ? ' ON' : ''}
         </button>
+
+        <div style={{ width: 1, height: 18, background: '#444' }} />
+
+        {/* 厨房図面ズームコントロール */}
+        <span style={{ fontSize: 11, color: '#aaa' }}>図面ズーム:</span>
+        <button
+          onClick={() => setCanvasZoom(canvasZoom - ZOOM_STEP)}
+          disabled={canvasZoom <= ZOOM_MIN}
+          style={{ ...btnStyle(), padding: '4px 8px', opacity: canvasZoom <= ZOOM_MIN ? 0.4 : 1 }}
+          title="縮小 (10%)"
+        >−</button>
+        <span style={{ fontSize: 13, color: '#fff', minWidth: 44, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
+          {Math.round(canvasZoom * 100)}%
+        </span>
+        <button
+          onClick={() => setCanvasZoom(canvasZoom + ZOOM_STEP)}
+          disabled={canvasZoom >= ZOOM_MAX}
+          style={{ ...btnStyle(), padding: '4px 8px', opacity: canvasZoom >= ZOOM_MAX ? 0.4 : 1 }}
+          title="拡大 (10%)"
+        >+</button>
+        <button
+          onClick={() => setCanvasZoom(1.0)}
+          style={{ ...btnStyle(canvasZoom === 1.0, '#3b82f6'), padding: '4px 8px', fontSize: 11 }}
+          title="100%に戻す"
+        >1:1</button>
+
+        <div style={{ width: 1, height: 18, background: '#444' }} />
+
         <button onClick={handleExport} style={btnStyle()}>PNG出力</button>
         <button onClick={() => window.print()} style={btnStyle()}>印刷</button>
       </div>
@@ -496,6 +536,7 @@ export default function KitchenLayout() {
               lines={kitchenLines}
               width={canvasW}
               height={canvasH}
+              zoom={canvasZoom}
               editMode={isEditingOutline}
               snapToGrid={snapToGrid}
               strokeWidth={currentStrokeWidth}
@@ -518,7 +559,7 @@ export default function KitchenLayout() {
                   equipment={eq}
                   isSelected={selectedIds.has(eq.id)}
                   showResizeHandles={selectedIds.size === 1 && selectedIds.has(eq.id)}
-                  canvasScale={CANVAS_SCALE}
+                  canvasScale={canvasZoom}
                   groupMates={mates}
                   onSelectItem={handleSelectItem}
                   onMove={handleMove}
@@ -531,8 +572,8 @@ export default function KitchenLayout() {
             {groupBox && (
               <div style={{
                 position: 'absolute',
-                left: groupBox.x * CANVAS_SCALE, top: groupBox.y * CANVAS_SCALE,
-                width: groupBox.w * CANVAS_SCALE, height: groupBox.h * CANVAS_SCALE,
+                left: groupBox.x * canvasZoom, top: groupBox.y * canvasZoom,
+                width: groupBox.w * canvasZoom, height: groupBox.h * canvasZoom,
                 border: `2px dashed ${selectedGroupIds.size === 1 ? '#f59e0b' : '#3b82f6'}`,
                 borderRadius: 3, pointerEvents: 'none', zIndex: 200, boxSizing: 'border-box',
               }} />
