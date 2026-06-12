@@ -15,8 +15,10 @@ export interface Equipment {
   name: string;
   x: number;
   y: number;
-  width: number;
-  depth: number;
+  width: number;    // canvas display pixels
+  depth: number;    // canvas display pixels
+  widthMm?: number; // actual physical width in mm
+  depthMm?: number; // actual physical depth in mm
   rotation: 0 | 90;
   memo: string;
   groupId?: string;

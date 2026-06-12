@@ -156,7 +156,9 @@ export default function EquipmentItem({
         </span>
         {!smallBox && (
           <span style={{ fontSize: Math.max(8, 10 * canvasScale), color: '#444', textAlign: 'center', lineHeight: 1.3 }}>
-            {equipment.width} × {equipment.depth} cm
+            {equipment.widthMm != null && equipment.depthMm != null
+              ? `${equipment.widthMm} × ${equipment.depthMm} mm`
+              : `${equipment.width} × ${equipment.depth} px`}
           </span>
         )}
       </div>

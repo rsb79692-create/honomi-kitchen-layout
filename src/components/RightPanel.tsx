@@ -7,20 +7,26 @@ interface Props {
   selectedCount: number;
   canGroup: boolean;
   canUngroup: boolean;
+  scalePxPerMm?: number;
   onUpdate: (updated: Equipment) => void;
   onDelete: (id: string) => void;
   onGroup: () => void;
   onUngroup: () => void;
+  onApplyRealDims?: (item: Equipment) => void;
 }
 
-export default function RightPanel({ equipment, selectedCount, canGroup, canUngroup, onUpdate, onDelete, onGroup, onUngroup }: Props) {
+export default function RightPanel({ equipment, selectedCount, canGroup, canUngroup, scalePxPerMm, onUpdate, onDelete, onGroup, onUngroup, onApplyRealDims }: Props) {
   const [localName, setLocalName] = useState('');
   const [localMemo, setLocalMemo] = useState('');
+  const [localWidthMm, setLocalWidthMm] = useState('');
+  const [localDepthMm, setLocalDepthMm] = useState('');
 
   useEffect(() => {
     if (equipment) {
       setLocalName(equipment.name);
       setLocalMemo(equipment.memo);
+      setLocalWidthMm(equipment.widthMm != null ? String(equipment.widthMm) : '');
+      setLocalDepthMm(equipment.depthMm != null ? String(equipment.depthMm) : '');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [equipment?.id]);
@@ -88,6 +94,42 @@ export default function RightPanel({ equipment, selectedCount, canGroup, canUngr
       <label style={labelStyle}>位置 Y</label>
       <input type="number" style={inputStyle} value={Math.round(equipment.y)} onChange={(e) => handleUpdate({ y: Number(e.target.value) })} />
 
+      <div style={{ borderTop: '1px solid #ddd', marginBottom: 10 }} />
+      <label style={labelStyle}>実寸 幅 (mm)</label>
+      <input
+        type="number"
+        style={inputStyle}
+        value={localWidthMm}
+        min={0}
+        placeholder="例: 700"
+        onChange={(e) => setLocalWidthMm(e.target.value)}
+        onBlur={() => {
+          const v = parseFloat(localWidthMm);
+          handleUpdate({ widthMm: isNaN(v) || v <= 0 ? undefined : v });
+        }}
+      />
+      <label style={labelStyle}>実寸 奥行 (mm)</label>
+      <input
+        type="number"
+        style={inputStyle}
+        value={localDepthMm}
+        min={0}
+        placeholder="例: 590"
+        onChange={(e) => setLocalDepthMm(e.target.value)}
+        onBlur={() => {
+          const v = parseFloat(localDepthMm);
+          handleUpdate({ depthMm: isNaN(v) || v <= 0 ? undefined : v });
+        }}
+      />
+      {scalePxPerMm != null && equipment.widthMm != null && equipment.depthMm != null && onApplyRealDims && (
+        <button
+          onClick={() => onApplyRealDims(equipment)}
+          style={{ ...btnStyle, background: '#dbeafe', border: '1px solid #93c5fd', color: '#1e40af', marginBottom: 10 }}
+          title={`1mm = ${scalePxPerMm.toFixed(3)}px`}
+        >
+          縮尺を図形に適用
+        </button>
+      )}
       <label style={labelStyle}>メモ</label>
       <textarea style={{ ...inputStyle, height: 60, resize: 'vertical' }} value={localMemo} onChange={(e) => setLocalMemo(e.target.value)} onBlur={() => handleUpdate({ memo: localMemo })} />
 

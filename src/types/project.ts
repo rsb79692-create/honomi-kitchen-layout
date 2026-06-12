@@ -23,6 +23,7 @@ export interface Project {
   showPdf: boolean;
   showEquipmentList: boolean;
   canvasZoom: number; // 0.5 – 2.0、10% 刻み
+  scalePxPerMm?: number; // 縮尺: 1mm あたりの canvas px
 }
 
 export function defaultProject(): Project {

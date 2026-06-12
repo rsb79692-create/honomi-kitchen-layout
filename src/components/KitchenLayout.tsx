@@ -59,6 +59,11 @@ export default function KitchenLayout() {
   // プリセット確認ダイアログの状態
   const [presetConfirm, setPresetConfirm] = useState<KitchenPreset | null>(null);
 
+  // 縮尺設定モード
+  const [isSettingScale, setIsSettingScale] = useState(false);
+  const [scalePoint1, setScalePoint1] = useState<{ x: number; y: number } | null>(null);
+  const [scaleMousePos, setScaleMousePos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
   // Reset selection when project changes
   const prevProjectId = useRef(currentProject?.id);
   useEffect(() => {
@@ -69,6 +74,8 @@ export default function KitchenLayout() {
       setSelectedLineId(null);
       setUndoStack([]);
       setPdfSize(null);
+      setIsSettingScale(false);
+      setScalePoint1(null);
     }
   }, [currentProject?.id]);
 
@@ -246,27 +253,26 @@ export default function KitchenLayout() {
   }, []);
 
   // ── プリセット適用 ────────────────────────────────────────────────────────
+  const buildPresetEquipments = (preset: KitchenPreset): Equipment[] =>
+    preset.items.map((item) => ({
+      id: genId(), type: item.type, name: item.name,
+      x: item.x, y: item.y, width: item.width, depth: item.depth,
+      widthMm: item.widthMm, depthMm: item.depthMm,
+      rotation: item.rotation, memo: item.memo ?? '',
+    }));
+
   const handlePresetButtonClick = useCallback((preset: KitchenPreset) => {
     if (equipments.length === 0) {
-      // 既存アイテムなし → 即座に配置
-      const items: Equipment[] = preset.items.map((item) => ({
-        id: genId(), type: item.type, name: item.name,
-        x: item.x, y: item.y, width: item.width, depth: item.depth,
-        rotation: item.rotation, memo: item.memo ?? '',
-      }));
-      setEquipments(items);
+      setEquipments(buildPresetEquipments(preset));
     } else {
       setPresetConfirm(preset);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [equipments.length, setEquipments]);
 
   const applyPreset = useCallback((action: 'add' | 'replace') => {
     if (!presetConfirm) return;
-    const items: Equipment[] = presetConfirm.items.map((item) => ({
-      id: genId(), type: item.type, name: item.name,
-      x: item.x, y: item.y, width: item.width, depth: item.depth,
-      rotation: item.rotation, memo: item.memo ?? '',
-    }));
+    const items = buildPresetEquipments(presetConfirm);
     if (action === 'replace') {
       setEquipments(items);
     } else {
@@ -274,6 +280,72 @@ export default function KitchenLayout() {
     }
     setPresetConfirm(null);
   }, [presetConfirm, setEquipments]);
+
+  // ── 縮尺設定 ──────────────────────────────────────────────────────────────
+  // Escape キーで縮尺設定モードをキャンセル
+  useEffect(() => {
+    if (!isSettingScale) return;
+    const h = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setIsSettingScale(false); setScalePoint1(null); }
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [isSettingScale]);
+
+  const handleScaleSvgMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setScaleMousePos({
+      x: (e.clientX - rect.left) / canvasZoom,
+      y: (e.clientY - rect.top) / canvasZoom,
+    });
+  }, [canvasZoom]);
+
+  const handleScaleSvgClick = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / canvasZoom;
+    const y = (e.clientY - rect.top) / canvasZoom;
+
+    if (!scalePoint1) {
+      setScalePoint1({ x, y });
+    } else {
+      const dx = x - scalePoint1.x;
+      const dy = y - scalePoint1.y;
+      const distPx = Math.sqrt(dx * dx + dy * dy);
+      setScalePoint1(null);
+
+      const input = window.prompt(
+        `2点間の実際の距離を入力してください（mm 単位）\n計測: ${distPx.toFixed(1)} px`,
+        '3600',
+      );
+      if (input !== null) {
+        const mm = parseFloat(input.replace(',', '.'));
+        if (!isNaN(mm) && mm > 0) {
+          updateProject({ scalePxPerMm: distPx / mm });
+          setIsSettingScale(false);
+        }
+      }
+    }
+  }, [scalePoint1, canvasZoom, updateProject]);
+
+  // 全アイテムに実寸を反映
+  const handleApplyRealDimsAll = useCallback(() => {
+    const scale = currentProject?.scalePxPerMm;
+    if (!scale) return;
+    setEquipments((prev) => prev.map((eq) => {
+      if (eq.widthMm != null && eq.depthMm != null) {
+        return { ...eq, width: Math.round(eq.widthMm * scale), depth: Math.round(eq.depthMm * scale) };
+      }
+      return eq;
+    }));
+  }, [currentProject?.scalePxPerMm, setEquipments]);
+
+  // 単体アイテムに実寸を反映（RightPanel から呼ばれる）
+  const handleApplyRealDimsSingle = useCallback((item: Equipment) => {
+    const scale = currentProject?.scalePxPerMm;
+    if (!scale || item.widthMm == null || item.depthMm == null) return;
+    handleUpdate({ ...item, width: Math.round(item.widthMm * scale), depth: Math.round(item.depthMm * scale) });
+  }, [currentProject?.scalePxPerMm, handleUpdate]);
 
   // ── export ────────────────────────────────────────────────────────────────
   const handleExport = async () => {
@@ -511,9 +583,64 @@ export default function KitchenLayout() {
 
         <div style={{ width: 1, height: 18, background: '#444' }} />
 
+        {/* 縮尺設定 */}
+        <button
+          onClick={() => {
+            setIsEditingOutline(false);
+            setIsSettingScale((v) => !v);
+            setScalePoint1(null);
+          }}
+          style={btnStyle(isSettingScale, '#dc2626')}
+          title="図面上の2点をクリックして実寸を入力し縮尺を設定"
+        >
+          縮尺設定{isSettingScale ? ' ON' : ''}
+        </button>
+        {currentProject?.scalePxPerMm != null && !isSettingScale && (
+          <span style={{ fontSize: 11, color: '#9ca3af', fontVariantNumeric: 'tabular-nums' }}
+            title="現在の縮尺">
+            1mm={currentProject.scalePxPerMm.toFixed(3)}px
+          </span>
+        )}
+        {currentProject?.scalePxPerMm != null && (() => {
+          const count = equipments.filter((e) => e.widthMm != null && e.depthMm != null).length;
+          return count > 0 ? (
+            <button
+              onClick={handleApplyRealDimsAll}
+              style={{ ...btnStyle(), background: '#1d4ed8', borderColor: '#1e40af', color: '#fff', fontSize: 12 }}
+              title={`実寸データを持つ ${count} 件のアイテムに縮尺を適用`}
+            >
+              実寸を図形に反映（{count}件）
+            </button>
+          ) : null;
+        })()}
+
+        <div style={{ width: 1, height: 18, background: '#444' }} />
+
         <button onClick={handleExport} style={btnStyle()}>PNG出力</button>
         <button onClick={() => window.print()} style={btnStyle()}>印刷</button>
       </div>
+
+      {/* ── 縮尺設定ツールバー ───────────────────────────────────────────── */}
+      {isSettingScale && (
+        <div style={{
+          background: '#fff1f2', borderBottom: '1px solid #fecdd3',
+          padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 14,
+          flexShrink: 0, fontSize: 12, color: '#9f1239', flexWrap: 'wrap',
+        }}>
+          <span>
+            {scalePoint1 ? '▶ 2点目をクリックしてください（Esc でキャンセル）' : '▶ 1点目をクリックしてください（Esc でキャンセル）'}
+          </span>
+          {currentProject?.scalePxPerMm != null && (
+            <span style={{ color: '#666' }}>現在: 1mm = {currentProject.scalePxPerMm.toFixed(3)}px</span>
+          )}
+          <button
+            onClick={() => { setIsSettingScale(false); setScalePoint1(null); }}
+            style={{ padding: '2px 8px', fontSize: 11, cursor: 'pointer', border: '1px solid #fca5a5', borderRadius: 3, background: '#fff', color: '#9f1239' }}
+          >
+            キャンセル
+          </button>
+        </div>
+      )}
 
       {/* ── プリセット確認バナー ──────────────────────────────────────────── */}
       {presetConfirm && (
@@ -646,6 +773,34 @@ export default function KitchenLayout() {
               );
             })}
 
+            {/* 縮尺測定 SVG オーバーレイ */}
+            {isSettingScale && (
+              <svg
+                viewBox={`0 0 ${canvasBaseW} ${canvasBaseH}`}
+                width={canvasW}
+                height={canvasH}
+                style={{ position: 'absolute', top: 0, left: 0, zIndex: 500, cursor: 'crosshair' }}
+                onMouseMove={handleScaleSvgMove}
+                onMouseDown={handleScaleSvgClick}
+              >
+                {/* 計測線プレビュー */}
+                {scalePoint1 && (
+                  <>
+                    <line
+                      x1={scalePoint1.x} y1={scalePoint1.y}
+                      x2={scaleMousePos.x} y2={scaleMousePos.y}
+                      stroke="#ef4444" strokeWidth={2 / canvasZoom}
+                      strokeDasharray={`${8 / canvasZoom} ${4 / canvasZoom}`}
+                    />
+                    <circle cx={scalePoint1.x} cy={scalePoint1.y} r={5 / canvasZoom} fill="#ef4444" />
+                    <circle cx={scaleMousePos.x} cy={scaleMousePos.y} r={3 / canvasZoom} fill="#ef4444" fillOpacity={0.6} />
+                  </>
+                )}
+                {/* 透明ヒットエリア */}
+                <rect x={0} y={0} width={canvasBaseW} height={canvasBaseH} fill="transparent" />
+              </svg>
+            )}
+
             {groupBox && (
               <div style={{
                 position: 'absolute',
@@ -691,10 +846,12 @@ export default function KitchenLayout() {
                     selectedCount={selectedIds.size}
                     canGroup={canGroup}
                     canUngroup={canUngroup}
+                    scalePxPerMm={currentProject?.scalePxPerMm}
                     onUpdate={handleUpdate}
                     onDelete={handleDelete}
                     onGroup={handleGroup}
                     onUngroup={handleUngroup}
+                    onApplyRealDims={handleApplyRealDimsSingle}
                   />
                 </div>
               )}
