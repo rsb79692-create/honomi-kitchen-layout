@@ -11,7 +11,7 @@ export interface PresetItem {
   depth: number;    // 図面上の見た目サイズ 奥行 (canvas px, ≈ depthMm/10)
   widthMm: number;  // 機器一覧表の実寸 幅 (mm)
   depthMm: number;  // 機器一覧表の実寸 奥行 (mm)
-  rotation: 0 | 90;
+  rotation: 0 | 90 | 180 | 270;
   memo?: string;
 }
 

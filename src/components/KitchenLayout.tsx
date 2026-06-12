@@ -13,7 +13,7 @@ import EquipmentItem from './EquipmentItem';
 import KitchenLineEditor from './KitchenLineEditor';
 import LeftPanel from './LeftPanel';
 import MappingPanel from './MappingPanel';
-import RightPanel from './RightPanel';
+import RightPanel, { type AlignMode } from './RightPanel';
 import EquipmentListPanel from './EquipmentListPanel';
 import EquipmentCatalogModal from './EquipmentCatalogModal';
 
@@ -22,6 +22,14 @@ const PdfCropModal = dynamic(() => import('./PdfCropModal'), { ssr: false });
 
 let idCounter = Date.now();
 const genId = () => String(++idCounter);
+
+function rotateEquip(e: Equipment, dir: 1 | -1): Equipment {
+  const next = ((e.rotation + dir * 90) % 360 + 360) % 360 as 0 | 90 | 180 | 270;
+  return { ...e, rotation: next };
+}
+
+function getDispW(e: Equipment) { return (e.rotation === 90 || e.rotation === 270) ? e.depth : e.width; }
+function getDispH(e: Equipment) { return (e.rotation === 90 || e.rotation === 270) ? e.width : e.depth; }
 
 type CropMode = 'kitchen' | 'equipment-list' | null;
 
@@ -77,6 +85,9 @@ export default function KitchenLayout() {
   } | null>(null);
 
   const [showCatalogModal, setShowCatalogModal] = useState(false);
+  const [snapEquipGrid, setSnapEquipGrid] = useState(false);
+  const snapEquipGridRef = useRef(false);
+  useEffect(() => { snapEquipGridRef.current = snapEquipGrid; }, [snapEquipGrid]);
 
   // 図面マッピングモード
   const [isMappingMode, setIsMappingMode] = useState(false);
@@ -132,8 +143,8 @@ export default function KitchenLayout() {
   if (selectedEqs.length >= 2) {
     const xs = selectedEqs.map((e) => e.x);
     const ys = selectedEqs.map((e) => e.y);
-    const rights = selectedEqs.map((e) => e.x + (e.rotation === 0 ? e.width : e.depth));
-    const bottoms = selectedEqs.map((e) => e.y + (e.rotation === 0 ? e.depth : e.width));
+    const rights = selectedEqs.map((e) => e.x + getDispW(e));
+    const bottoms = selectedEqs.map((e) => e.y + getDispH(e));
     groupBox = {
       x: Math.min(...xs) - 4, y: Math.min(...ys) - 4,
       w: Math.max(...rights) - Math.min(...xs) + 8,
@@ -166,11 +177,14 @@ export default function KitchenLayout() {
   }, [equipments]);
 
   const handleMove = useCallback((id: string, x: number, y: number) => {
-    setEquipments((prev) => prev.map((e) => e.id === id ? { ...e, x, y } : e));
+    const sx = snapEquipGridRef.current ? Math.round(x / 10) * 10 : x;
+    const sy = snapEquipGridRef.current ? Math.round(y / 10) * 10 : y;
+    setEquipments((prev) => prev.map((e) => e.id === id ? { ...e, x: sx, y: sy } : e));
   }, [setEquipments]);
 
   const handleMoveMultiple = useCallback((moves: Array<{ id: string; x: number; y: number }>) => {
-    const map = new Map(moves.map((m) => [m.id, m]));
+    const snap = (v: number) => snapEquipGridRef.current ? Math.round(v / 10) * 10 : v;
+    const map = new Map(moves.map((m) => [m.id, { x: snap(m.x), y: snap(m.y) }]));
     setEquipments((prev) => prev.map((e) => { const m = map.get(e.id); return m ? { ...e, x: m.x, y: m.y } : e; }));
   }, [setEquipments]);
 
@@ -179,7 +193,8 @@ export default function KitchenLayout() {
   }, [setEquipments]);
 
   const handleResize = useCallback((id: string, width: number, depth: number) => {
-    setEquipments((prev) => prev.map((e) => e.id === id ? { ...e, width, depth } : e));
+    const snap = (v: number) => snapEquipGridRef.current ? Math.round(v / 10) * 10 : v;
+    setEquipments((prev) => prev.map((e) => e.id === id ? { ...e, width: snap(width), depth: snap(depth) } : e));
   }, [setEquipments]);
 
   // ── 機器 Undo ─────────────────────────────────────────────────────────────
@@ -239,6 +254,50 @@ export default function KitchenLayout() {
     setEquipments((prev) => prev.filter((e) => !selectedIds.has(e.id)));
     setSelectedIds(new Set());
   }, [selectedIds, pushEquipUndo, setEquipments]);
+
+  const handleRotateRight = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    pushEquipUndo();
+    setEquipments((prev) => prev.map((e) => selectedIds.has(e.id) ? rotateEquip(e, 1) : e));
+  }, [selectedIds, setEquipments, pushEquipUndo]);
+
+  const handleRotateLeft = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    pushEquipUndo();
+    setEquipments((prev) => prev.map((e) => selectedIds.has(e.id) ? rotateEquip(e, -1) : e));
+  }, [selectedIds, setEquipments, pushEquipUndo]);
+
+  const handleAlign = useCallback((mode: AlignMode) => {
+    if (selectedIds.size < 2) return;
+    const items = equipments.filter((e) => selectedIds.has(e.id));
+    const minLeft  = Math.min(...items.map((e) => e.x));
+    const maxRight = Math.max(...items.map((e) => e.x + getDispW(e)));
+    const minTop   = Math.min(...items.map((e) => e.y));
+    const maxBot   = Math.max(...items.map((e) => e.y + getDispH(e)));
+    const newPos = new Map<string, { x: number; y: number }>();
+
+    if (mode === 'left')   { items.forEach((e) => newPos.set(e.id, { x: minLeft, y: e.y })); }
+    else if (mode === 'right')  { items.forEach((e) => newPos.set(e.id, { x: maxRight - getDispW(e), y: e.y })); }
+    else if (mode === 'top')    { items.forEach((e) => newPos.set(e.id, { x: e.x, y: minTop })); }
+    else if (mode === 'bottom') { items.forEach((e) => newPos.set(e.id, { x: e.x, y: maxBot - getDispH(e) })); }
+    else if (mode === 'h-distribute') {
+      const sorted = [...items].sort((a, b) => a.x - b.x);
+      const totalW = sorted.reduce((s, e) => s + getDispW(e), 0);
+      const gap = sorted.length > 1 ? (maxRight - minLeft - totalW) / (sorted.length - 1) : 0;
+      let nextX = minLeft;
+      sorted.forEach((e) => { newPos.set(e.id, { x: Math.round(nextX), y: e.y }); nextX += getDispW(e) + gap; });
+    }
+    else if (mode === 'v-distribute') {
+      const sorted = [...items].sort((a, b) => a.y - b.y);
+      const totalH = sorted.reduce((s, e) => s + getDispH(e), 0);
+      const gap = sorted.length > 1 ? (maxBot - minTop - totalH) / (sorted.length - 1) : 0;
+      let nextY = minTop;
+      sorted.forEach((e) => { newPos.set(e.id, { x: e.x, y: Math.round(nextY) }); nextY += getDispH(e) + gap; });
+    }
+
+    pushEquipUndo();
+    setEquipments((prev) => prev.map((e) => { const p = newPos.get(e.id); return p ? { ...e, ...p } : e; }));
+  }, [selectedIds, equipments, setEquipments, pushEquipUndo]);
 
   // ── line handlers ─────────────────────────────────────────────────────────
   const handleSelectLine = useCallback((id: string | null) => {
@@ -302,8 +361,12 @@ export default function KitchenLayout() {
   // 機器 Undo / Delete キー（アウトライン編集中は除外）
   const handleEquipUndoRef = useRef(handleEquipUndo);
   const handleDeleteSelectedRef = useRef(handleDeleteSelected);
+  const handleRotateRightRef = useRef(handleRotateRight);
+  const handleRotateLeftRef = useRef(handleRotateLeft);
   useEffect(() => { handleEquipUndoRef.current = handleEquipUndo; }, [handleEquipUndo]);
   useEffect(() => { handleDeleteSelectedRef.current = handleDeleteSelected; }, [handleDeleteSelected]);
+  useEffect(() => { handleRotateRightRef.current = handleRotateRight; }, [handleRotateRight]);
+  useEffect(() => { handleRotateLeftRef.current = handleRotateLeft; }, [handleRotateLeft]);
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement ||
@@ -316,6 +379,11 @@ export default function KitchenLayout() {
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         handleDeleteSelectedRef.current();
+      }
+      if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        if (e.shiftKey) handleRotateLeftRef.current();
+        else handleRotateRightRef.current();
       }
     };
     window.addEventListener('keydown', h);
@@ -353,8 +421,8 @@ export default function KitchenLayout() {
       if (selRight - selLeft > 4 || selBottom - selTop > 4) {
         const selected = new Set<string>();
         for (const eq of snapshot) {
-          const eW = eq.rotation === 0 ? eq.width : eq.depth;
-          const eH = eq.rotation === 0 ? eq.depth : eq.width;
+          const eW = getDispW(eq);
+          const eH = getDispH(eq);
           if (eq.x < selRight && eq.x + eW > selLeft && eq.y < selBottom && eq.y + eH > selTop) {
             selected.add(eq.id);
           }
@@ -857,6 +925,17 @@ export default function KitchenLayout() {
 
         <div style={{ width: 1, height: 18, background: '#444' }} />
 
+        {/* 機器スナップ */}
+        <button
+          onClick={() => setSnapEquipGrid((v) => !v)}
+          style={btnStyle(snapEquipGrid, '#10b981')}
+          title="機器移動・リサイズを10px単位に吸着"
+        >
+          スナップ{snapEquipGrid ? ' ON' : ''}
+        </button>
+
+        <div style={{ width: 1, height: 18, background: '#444' }} />
+
         {/* 縮尺設定 */}
         <button
           onClick={() => {
@@ -1223,6 +1302,9 @@ export default function KitchenLayout() {
                     onGroup={handleGroup}
                     onUngroup={handleUngroup}
                     onApplyRealDims={handleApplyRealDimsSingle}
+                    onRotateRight={handleRotateRight}
+                    onRotateLeft={handleRotateLeft}
+                    onAlign={handleAlign}
                   />
                 </div>
               )}

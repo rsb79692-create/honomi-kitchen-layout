@@ -19,7 +19,7 @@ export interface Equipment {
   depth: number;    // canvas display pixels
   widthMm?: number; // actual physical width in mm
   depthMm?: number; // actual physical depth in mm
-  rotation: 0 | 90;
+  rotation: 0 | 90 | 180 | 270;
   memo: string;
   groupId?: string;
 }

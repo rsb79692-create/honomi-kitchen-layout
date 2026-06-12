@@ -27,12 +27,13 @@ export default function EquipmentItem({
   const resizeStart = useRef<{
     mouseX: number; mouseY: number;
     width: number; depth: number;
-    rotation: 0 | 90;
+    rotation: 0 | 90 | 180 | 270;
     dir: 'right' | 'bottom' | 'corner';
   } | null>(null);
 
-  const displayWidth = equipment.rotation === 0 ? equipment.width : equipment.depth;
-  const displayHeight = equipment.rotation === 0 ? equipment.depth : equipment.width;
+  const isRotated = equipment.rotation === 90 || equipment.rotation === 270;
+  const displayWidth = isRotated ? equipment.depth : equipment.width;
+  const displayHeight = isRotated ? equipment.width : equipment.depth;
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (resizeStart.current) return;
@@ -85,16 +86,17 @@ export default function EquipmentItem({
 
       let newWidth = s.width;
       let newDepth = s.depth;
+      const sRotated = s.rotation === 90 || s.rotation === 270;
 
       if (dir === 'right' || dir === 'corner') {
-        if (s.rotation === 0) {
+        if (!sRotated) {
           newWidth = Math.max(MIN_CM, Math.round(s.width + dx));
         } else {
           newDepth = Math.max(MIN_CM, Math.round(s.depth + dx));
         }
       }
       if (dir === 'bottom' || dir === 'corner') {
-        if (s.rotation === 0) {
+        if (!sRotated) {
           newDepth = Math.max(MIN_CM, Math.round(s.depth + dy));
         } else {
           newWidth = Math.max(MIN_CM, Math.round(s.width + dy));
