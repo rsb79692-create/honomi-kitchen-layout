@@ -52,13 +52,11 @@ export default function EquipmentListPanel({ pdfData, pageNumber, cropRegion, on
   }, [pdfData, pageNumber, cropKey]);
 
   return (
-    <div style={{
-      width: 260, background: '#f8f8f8', borderLeft: '1px solid #ccc',
-      display: 'flex', flexDirection: 'column', flexShrink: 0,
-    }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, background: '#f8f8f8' }}>
+      {/* ツールバー */}
       <div style={{
-        padding: '6px 10px', borderBottom: '1px solid #ddd',
-        display: 'flex', alignItems: 'center', gap: 6,
+        padding: '5px 8px', borderBottom: '1px solid #ddd',
+        display: 'flex', alignItems: 'center', gap: 5,
         background: '#efefef', flexShrink: 0,
       }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: '#333' }}>機器リスト</span>
@@ -69,32 +67,39 @@ export default function EquipmentListPanel({ pdfData, pageNumber, cropRegion, on
           範囲設定
         </button>
         <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 11, color: '#999', minWidth: 30, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
         <button
-          onClick={() => setZoom((z) => Math.min(3, +(z + 0.25).toFixed(2)))}
-          style={{ width: 22, height: 22, cursor: 'pointer', border: '1px solid #bbb', borderRadius: 3, background: '#fff', fontSize: 14, lineHeight: 1, padding: 0 }}
+          onClick={() => setZoom((z) => Math.min(4, +(z + 0.25).toFixed(2)))}
+          style={{ width: 22, height: 22, cursor: 'pointer', border: '1px solid #bbb', borderRadius: 3, background: '#fff', fontSize: 15, lineHeight: '20px', padding: 0, textAlign: 'center' }}
           title="拡大"
         >+</button>
         <button
-          onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))}
-          style={{ width: 22, height: 22, cursor: 'pointer', border: '1px solid #bbb', borderRadius: 3, background: '#fff', fontSize: 14, lineHeight: 1, padding: 0 }}
+          onClick={() => setZoom((z) => Math.max(0.25, +(z - 0.25).toFixed(2)))}
+          style={{ width: 22, height: 22, cursor: 'pointer', border: '1px solid #bbb', borderRadius: 3, background: '#fff', fontSize: 15, lineHeight: '20px', padding: 0, textAlign: 'center' }}
           title="縮小"
         >−</button>
+        <button
+          onClick={() => setZoom(1.0)}
+          style={{ fontSize: 10, padding: '2px 5px', cursor: 'pointer', border: '1px solid #bbb', borderRadius: 3, background: '#fff' }}
+          title="等倍"
+        >1:1</button>
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: 4 }}>
+      {/* コンテンツ */}
+      <div style={{ flex: 1, overflow: 'auto', padding: 4, minHeight: 0 }}>
         {!pdfData && (
-          <p style={{ fontSize: 12, color: '#999', textAlign: 'center', marginTop: 20 }}>
+          <p style={{ fontSize: 12, color: '#aaa', textAlign: 'center', marginTop: 24, lineHeight: 1.8 }}>
             PDFをアップロードしてください
           </p>
         )}
         {pdfData && !cropRegion && (
-          <p style={{ fontSize: 12, color: '#999', textAlign: 'center', marginTop: 20, lineHeight: 1.6 }}>
+          <p style={{ fontSize: 12, color: '#aaa', textAlign: 'center', marginTop: 24, lineHeight: 1.8 }}>
             「範囲設定」で<br />機器リストエリアを<br />指定してください
           </p>
         )}
         {pdfData && cropRegion && (
           <div style={{ transform: `scale(${zoom})`, transformOrigin: 'top left', display: 'inline-block' }}>
-            <canvas ref={canvasRef} style={{ display: 'block', maxWidth: 'none' }} />
+            <canvas ref={canvasRef} style={{ display: 'block' }} />
           </div>
         )}
       </div>

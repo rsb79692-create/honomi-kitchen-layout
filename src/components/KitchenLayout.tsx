@@ -47,6 +47,9 @@ export default function KitchenLayout() {
   const [nameInput, setNameInput] = useState('');
   const canvasRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [rightWidth, setRightWidth] = useState(390);
+  const rightWidthRef = useRef(rightWidth);
+  useEffect(() => { rightWidthRef.current = rightWidth; }, [rightWidth]);
 
   // Reset selection when project changes
   const prevProjectId = useRef(currentProject?.id);
@@ -216,6 +219,23 @@ export default function KitchenLayout() {
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, [isEditingOutline]);
+
+  // ── right panel resize ───────────────────────────────────────────────────
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = rightWidthRef.current;
+    const onMove = (ev: MouseEvent) => {
+      const dx = startX - ev.clientX; // drag left → wider
+      setRightWidth(Math.max(250, Math.min(700, startW + dx)));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, []);
 
   // ── export ────────────────────────────────────────────────────────────────
   const handleExport = async () => {
@@ -520,24 +540,58 @@ export default function KitchenLayout() {
           </div>
         </div>
 
-        <RightPanel
-          equipment={singleSelected}
-          selectedCount={selectedIds.size}
-          canGroup={canGroup}
-          canUngroup={canUngroup}
-          onUpdate={handleUpdate}
-          onDelete={handleDelete}
-          onGroup={handleGroup}
-          onUngroup={handleUngroup}
-        />
+        {/* ── 右カラム（リサイズハンドル + 編集パネル + 機器リスト） ──────── */}
+        {(selectedIds.size > 0 || showEquipmentList) && (
+          <>
+            {/* ドラッグリサイズハンドル */}
+            <div
+              onMouseDown={handleResizeStart}
+              style={{
+                width: 5, flexShrink: 0, cursor: 'ew-resize',
+                background: '#c8c8c8', transition: 'background 0.15s',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#3b82f6'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#c8c8c8'; }}
+              title="ドラッグで幅変更"
+            />
 
-        {showEquipmentList && (
-          <EquipmentListPanel
-            pdfData={pdfData}
-            pageNumber={currentProject?.pdfPageNumber ?? 1}
-            cropRegion={currentProject?.equipmentListCrop}
-            onSetCrop={() => setCropMode('equipment-list')}
-          />
+            {/* 右カラム本体 */}
+            <div style={{
+              width: rightWidth, flexShrink: 0,
+              display: 'flex', flexDirection: 'column',
+              overflow: 'hidden', background: '#f5f5f5',
+            }}>
+              {/* 機器編集パネル（選択時のみ、最大高さ制限付きでスクロール可） */}
+              {selectedIds.size > 0 && (
+                <div style={{
+                  flexShrink: 0, overflowY: 'auto',
+                  maxHeight: showEquipmentList ? 340 : '100%',
+                  borderBottom: showEquipmentList ? '1px solid #ccc' : 'none',
+                }}>
+                  <RightPanel
+                    equipment={singleSelected}
+                    selectedCount={selectedIds.size}
+                    canGroup={canGroup}
+                    canUngroup={canUngroup}
+                    onUpdate={handleUpdate}
+                    onDelete={handleDelete}
+                    onGroup={handleGroup}
+                    onUngroup={handleUngroup}
+                  />
+                </div>
+              )}
+
+              {/* 機器リストパネル（flex:1 で残り高さ全部） */}
+              {showEquipmentList && (
+                <EquipmentListPanel
+                  pdfData={pdfData}
+                  pageNumber={currentProject?.pdfPageNumber ?? 1}
+                  cropRegion={currentProject?.equipmentListCrop}
+                  onSetCrop={() => setCropMode('equipment-list')}
+                />
+              )}
+            </div>
+          </>
         )}
       </div>
 
