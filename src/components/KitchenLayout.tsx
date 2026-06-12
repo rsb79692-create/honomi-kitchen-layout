@@ -645,9 +645,9 @@ export default function KitchenLayout() {
         <button
           onClick={() => handlePresetButtonClick(ASTERA_PRESET)}
           style={{ ...btnStyle(), fontSize: 12, padding: '4px 10px', background: '#7c3aed', borderColor: '#6d28d9', color: '#fff' }}
-          title="アステラ新築厨房の機器26点をキャンバスに配置します"
+          title="機器26点を図面上の見た目位置に初期配置（手動調整前提）"
         >
-          図面から機器を作成
+          図面通り配置
         </button>
         {equipments.length > 0 && (
           <button
@@ -735,7 +735,7 @@ export default function KitchenLayout() {
               style={{ ...btnStyle(), background: '#1d4ed8', borderColor: '#1e40af', color: '#fff', fontSize: 12 }}
               title={`実寸データを持つ ${count} 件のアイテムに縮尺を適用`}
             >
-              実寸を図形に反映（{count}件）
+              実寸サイズ反映（{count}件）
             </button>
           ) : null;
         })()}
@@ -786,7 +786,7 @@ export default function KitchenLayout() {
         }}>
           <span>
             既存のアイテムが {equipments.length} 個あります。
-            「{presetConfirm.label}」の {presetConfirm.items.length} 点をどう配置しますか？
+            「{presetConfirm.label}」{presetConfirm.items.length} 点を：
           </span>
           <button
             onClick={() => applyPreset('add')}
