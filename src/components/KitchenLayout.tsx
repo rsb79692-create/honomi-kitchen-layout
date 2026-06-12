@@ -7,12 +7,15 @@ import type { CropRegion } from '@/types/project';
 import { useProjects } from '@/hooks/useProjects';
 import { ASTERA_PRESET } from '@/data/presets';
 import type { KitchenPreset, PresetItem } from '@/data/presets';
+import type { CatalogItem } from '@/types/catalog';
+import { ASTERA_CATALOG_DEFAULT, catalogDisplayName } from '@/data/catalog';
 import EquipmentItem from './EquipmentItem';
 import KitchenLineEditor from './KitchenLineEditor';
 import LeftPanel from './LeftPanel';
 import MappingPanel from './MappingPanel';
 import RightPanel from './RightPanel';
 import EquipmentListPanel from './EquipmentListPanel';
+import EquipmentCatalogModal from './EquipmentCatalogModal';
 
 const PdfBackground = dynamic(() => import('./PdfBackground'), { ssr: false });
 const PdfCropModal = dynamic(() => import('./PdfCropModal'), { ssr: false });
@@ -73,6 +76,8 @@ export default function KitchenLayout() {
     startX: number; startY: number; curX: number; curY: number;
   } | null>(null);
 
+  const [showCatalogModal, setShowCatalogModal] = useState(false);
+
   // 図面マッピングモード
   const [isMappingMode, setIsMappingMode] = useState(false);
   const [mappingItem, setMappingItem] = useState<PresetItem | null>(null);
@@ -99,6 +104,7 @@ export default function KitchenLayout() {
       setMappingItem(null);
       setMappedNumbers(new Set());
       setMappingDrag(null);
+      setShowCatalogModal(false);
     }
   }, [currentProject?.id]);
 
@@ -367,9 +373,12 @@ export default function KitchenLayout() {
 
   // ── 図面マッピング ────────────────────────────────────────────────────────
   const handleStartMapping = useCallback(() => {
+    const catalog = currentProject?.equipmentCatalog ?? ASTERA_CATALOG_DEFAULT;
     const detected = new Set<number>();
     for (const presetItem of ASTERA_PRESET.items) {
-      if (equipmentsRef.current.some((eq) => eq.name === presetItem.name)) {
+      const catEntry = catalog.find(c => c.no === presetItem.number);
+      const expectedName = catEntry ? catalogDisplayName(catEntry) : presetItem.name;
+      if (equipmentsRef.current.some((eq) => eq.name === expectedName)) {
         detected.add(presetItem.number);
       }
     }
@@ -378,7 +387,7 @@ export default function KitchenLayout() {
     setMappingItem(firstUnplaced ?? ASTERA_PRESET.items[0]);
     setIsMappingMode(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [currentProject?.equipmentCatalog]);
 
   const handleStopMapping = useCallback(() => {
     setIsMappingMode(false);
@@ -395,6 +404,11 @@ export default function KitchenLayout() {
     updateProject((prev) => ({
       mappingNames: { ...(prev.mappingNames ?? {}), [number]: name },
     }));
+  }, [updateProject]);
+
+  const handleCatalogSave = useCallback((catalog: CatalogItem[]) => {
+    updateProject({ equipmentCatalog: catalog });
+    setShowCatalogModal(false);
   }, [updateProject]);
 
   const handleMappingMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -431,16 +445,22 @@ export default function KitchenLayout() {
       pushEquipUndo();
       const x = Math.round(Math.min(startX, curX));
       const y = Math.round(Math.min(startY, curY));
-      const resolvedName = currentProject?.mappingNames?.[mappingItem.number] ?? mappingItem.name;
+      const catalog = currentProject?.equipmentCatalog ?? ASTERA_CATALOG_DEFAULT;
+      const catEntry = catalog.find(c => c.no === mappingItem.number);
+      const resolvedName = catEntry
+        ? catalogDisplayName(catEntry)
+        : (currentProject?.mappingNames?.[mappingItem.number] ?? mappingItem.name);
+      const effectiveWidthMm = catEntry?.widthMm ?? mappingItem.widthMm;
+      const effectiveDepthMm = catEntry?.depthMm ?? mappingItem.depthMm;
       const newItem: Equipment = {
         id: genId(), type: mappingItem.type, name: resolvedName,
         x, y,
         width: Math.round(w), depth: Math.round(d),
-        widthMm: mappingItem.widthMm, depthMm: mappingItem.depthMm,
+        widthMm: effectiveWidthMm, depthMm: effectiveDepthMm,
         rotation: 0, memo: '',
       };
       setEquipments((prev) => {
-        const filtered = hasDuplicate ? prev.filter((eq) => eq.name !== mappingItem.name) : prev;
+        const filtered = hasDuplicate ? prev.filter((eq) => eq.name !== resolvedName) : prev;
         return [...filtered, newItem];
       });
       setSelectedIds(new Set([newItem.id]));
@@ -454,7 +474,7 @@ export default function KitchenLayout() {
 
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [mappingItem, mappedNumbers, canvasZoom, currentProject?.mappingNames, setEquipments, pushEquipUndo]);
+  }, [mappingItem, mappedNumbers, canvasZoom, currentProject?.mappingNames, currentProject?.equipmentCatalog, setEquipments, pushEquipUndo]);
 
   // Escape キーで図面マッピングモードをキャンセル
   useEffect(() => {
@@ -643,6 +663,8 @@ export default function KitchenLayout() {
   const canvasW = Math.round(canvasBaseW * canvasZoom);
   const canvasH = Math.round(canvasBaseH * canvasZoom);
 
+  const resolvedCatalog: CatalogItem[] = currentProject?.equipmentCatalog ?? ASTERA_CATALOG_DEFAULT;
+
   const setCanvasZoom = useCallback((next: number) => {
     const clamped = Math.round(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next)) * 10) / 10;
     updateProject({ canvasZoom: clamped });
@@ -767,6 +789,13 @@ export default function KitchenLayout() {
           title="機器26点を図面上の見た目位置に初期配置（手動調整前提）"
         >
           簡易自動配置
+        </button>
+        <button
+          onClick={() => setShowCatalogModal(true)}
+          style={{ ...btnStyle(), fontSize: 12, padding: '4px 10px', background: '#0369a1', borderColor: '#0284c7', color: '#fff' }}
+          title="案件ごとの機器一覧データを編集（名称・寸法）"
+        >
+          機器一覧編集
         </button>
         {equipments.length > 0 && (
           <button
@@ -991,6 +1020,7 @@ export default function KitchenLayout() {
             activeItem={mappingItem}
             scalePxPerMm={currentProject?.scalePxPerMm}
             mappingNames={currentProject?.mappingNames ?? {}}
+            catalog={resolvedCatalog}
             onSelect={setMappingItem}
             onSelectNext={handleSelectNextUnmapped}
             onNameEdit={handleMappingNameEdit}
@@ -1210,6 +1240,15 @@ export default function KitchenLayout() {
           </>
         )}
       </div>
+
+      {/* ── Equipment Catalog Modal ──────────────────────────────────────────── */}
+      {showCatalogModal && (
+        <EquipmentCatalogModal
+          catalog={resolvedCatalog}
+          onSave={handleCatalogSave}
+          onClose={() => setShowCatalogModal(false)}
+        />
+      )}
 
       {/* ── PDF Crop Modal ─────────────────────────────────────────────────── */}
       {cropMode && pdfData && currentProject && (

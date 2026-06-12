@@ -1,6 +1,8 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
 import type { KitchenPreset, PresetItem } from '@/data/presets';
+import type { CatalogItem } from '@/types/catalog';
+import { catalogDisplayName } from '@/data/catalog';
 
 interface Props {
   preset: KitchenPreset;
@@ -8,6 +10,7 @@ interface Props {
   activeItem: PresetItem | null;
   scalePxPerMm?: number;
   mappingNames: Record<number, string>;
+  catalog: CatalogItem[];
   onSelect: (item: PresetItem) => void;
   onSelectNext: () => void;
   onNameEdit: (number: number, name: string) => void;
@@ -16,7 +19,7 @@ interface Props {
 
 export default function MappingPanel({
   preset, mappedNumbers, activeItem, scalePxPerMm,
-  mappingNames, onSelect, onSelectNext, onNameEdit, onExit,
+  mappingNames, catalog, onSelect, onSelectNext, onNameEdit, onExit,
 }: Props) {
   const placedCount = mappedNumbers.size;
   const totalCount = preset.items.length;
@@ -30,12 +33,11 @@ export default function MappingPanel({
     if (editingNumber !== null) inputRef.current?.focus();
   }, [editingNumber]);
 
-  const resolveName = (item: PresetItem) => mappingNames[item.number] ?? item.name;
-
   const startEdit = (e: React.MouseEvent, item: PresetItem) => {
     e.stopPropagation();
     setEditingNumber(item.number);
-    setEditValue(resolveName(item));
+    const catalogEntry = catalog.find(c => c.no === item.number);
+    setEditValue(catalogEntry ? catalogEntry.name : (mappingNames[item.number] ?? item.name));
   };
 
   const commitEdit = () => {
@@ -88,15 +90,21 @@ export default function MappingPanel({
         {preset.items.map((item) => {
           const isPlaced = mappedNumbers.has(item.number);
           const isActive = activeItem?.number === item.number;
-          const displayName = resolveName(item);
           const isEditing = editingNumber === item.number;
-          const isOverridden = !!mappingNames[item.number] && mappingNames[item.number] !== item.name;
+
+          const catalogEntry = catalog.find(c => c.no === item.number);
+          const displayName = catalogEntry
+            ? catalogDisplayName(catalogEntry)
+            : (mappingNames[item.number] ?? item.name);
+          const wMm = catalogEntry?.widthMm ?? item.widthMm;
+          const dMm = catalogEntry?.depthMm ?? item.depthMm;
+          const isOverridden = !!catalogEntry || !!mappingNames[item.number];
 
           return (
             <div
               key={item.number}
               onClick={() => !isEditing && onSelect(item)}
-              title={`${displayName}  ${item.widthMm} × ${item.depthMm} mm`}
+              title={`${displayName}  ${wMm} × ${dMm} mm`}
               style={{
                 padding: '4px 6px',
                 marginBottom: 2,

@@ -1,5 +1,6 @@
 import type { Equipment } from './equipment';
 import type { KitchenLine } from './kitchenLine';
+import type { CatalogItem } from './catalog';
 
 export interface CropRegion {
   x: number; // 0-1 fraction of PDF page width
@@ -25,6 +26,7 @@ export interface Project {
   canvasZoom: number; // 0.5 – 2.0、10% 刻み
   scalePxPerMm?: number; // 縮尺: 1mm あたりの canvas px
   mappingNames?: Record<number, string>; // 案件ごとの機器名上書き: プリセット番号 → 表示名
+  equipmentCatalog?: CatalogItem[]; // 案件ごとの機器一覧データ
 }
 
 export function defaultProject(): Project {
