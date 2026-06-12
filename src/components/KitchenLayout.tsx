@@ -31,15 +31,13 @@ function rotateEquip(e: Equipment, dir: 1 | -1): Equipment {
 function getDispW(e: Equipment) { return (e.rotation === 90 || e.rotation === 270) ? e.depth : e.width; }
 function getDispH(e: Equipment) { return (e.rotation === 90 || e.rotation === 270) ? e.width : e.depth; }
 
+// 浮動小数誤差の許容幅: 接触・微小ギャップを「重ならない」と判定するため
+const EPS = 0.01;
+
 function equipmentOverlap(a: Equipment, b: Equipment): boolean {
-  // Round to nearest integer before comparison — eliminates floating-point false positives
-  // (e.g. a width of 100.4 placed at x=50 should NOT flag touching item at x=150 as overlapping)
-  // Touching edges (ar === bx) use <= so they are NOT treated as overlap.
-  const ax = Math.round(a.x), aw = Math.round(getDispW(a));
-  const ay = Math.round(a.y), ah = Math.round(getDispH(a));
-  const bx = Math.round(b.x), bw = Math.round(getDispW(b));
-  const by = Math.round(b.y), bh = Math.round(getDispH(b));
-  return !(ax + aw <= bx || ax >= bx + bw || ay + ah <= by || ay >= by + bh);
+  const ar = a.x + getDispW(a), ab = a.y + getDispH(a);
+  const br = b.x + getDispW(b), bb = b.y + getDispH(b);
+  return !(ar <= b.x + EPS || a.x >= br - EPS || ab <= b.y + EPS || a.y >= bb - EPS);
 }
 
 type CropMode = 'kitchen' | 'equipment-list' | null;
