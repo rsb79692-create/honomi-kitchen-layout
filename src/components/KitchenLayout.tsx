@@ -322,42 +322,87 @@ export default function KitchenLayout() {
   const handleAlign = useCallback((mode: AlignMode) => {
     if (selectedIds.size < 2) return;
     const items = equipments.filter((e) => selectedIds.has(e.id));
+    const nonSelected = equipments.filter((e) => !selectedIds.has(e.id));
     const minLeft  = Math.min(...items.map((e) => e.x));
     const maxRight = Math.max(...items.map((e) => e.x + getDispW(e)));
     const minTop   = Math.min(...items.map((e) => e.y));
     const maxBot   = Math.max(...items.map((e) => e.y + getDispH(e)));
-    const newPos = new Map<string, { x: number; y: number }>();
+    const posMap = new Map<string, { x: number; y: number }>();
 
-    // 左/右/上/下: 一般的な整列（端を揃える）
     if (mode === 'left') {
-      // 全アイテムの左端を minLeft に揃える
-      items.forEach(e => { newPos.set(e.id, { x: Math.round(minLeft), y: e.y }); });
+      items.forEach(e => posMap.set(e.id, { x: Math.round(minLeft), y: e.y }));
     } else if (mode === 'right') {
-      // 全アイテムの右端を maxRight に揃える
-      items.forEach(e => { newPos.set(e.id, { x: Math.round(maxRight - getDispW(e)), y: e.y }); });
+      items.forEach(e => posMap.set(e.id, { x: Math.round(maxRight - getDispW(e)), y: e.y }));
     } else if (mode === 'top') {
-      // 全アイテムの上端を minTop に揃える
-      items.forEach(e => { newPos.set(e.id, { x: e.x, y: Math.round(minTop) }); });
+      items.forEach(e => posMap.set(e.id, { x: e.x, y: Math.round(minTop) }));
     } else if (mode === 'bottom') {
-      // 全アイテムの下端を maxBot に揃える
-      items.forEach(e => { newPos.set(e.id, { x: e.x, y: Math.round(maxBot - getDispH(e)) }); });
+      items.forEach(e => posMap.set(e.id, { x: e.x, y: Math.round(maxBot - getDispH(e)) }));
     } else if (mode === 'h-distribute') {
-      // 間隔が足りない場合は gap=0（詰め込み）
       const sorted = [...items].sort((a, b) => a.x - b.x);
       const totalW = sorted.reduce((s, e) => s + getDispW(e), 0);
       const gap = Math.max(0, sorted.length > 1 ? (maxRight - minLeft - totalW) / (sorted.length - 1) : 0);
       let nx = minLeft;
-      sorted.forEach(e => { newPos.set(e.id, { x: Math.round(nx), y: e.y }); nx += getDispW(e) + gap; });
+      sorted.forEach(e => { posMap.set(e.id, { x: Math.round(nx), y: e.y }); nx += getDispW(e) + gap; });
     } else if (mode === 'v-distribute') {
       const sorted = [...items].sort((a, b) => a.y - b.y);
       const totalH = sorted.reduce((s, e) => s + getDispH(e), 0);
       const gap = Math.max(0, sorted.length > 1 ? (maxBot - minTop - totalH) / (sorted.length - 1) : 0);
       let ny = minTop;
-      sorted.forEach(e => { newPos.set(e.id, { x: e.x, y: Math.round(ny) }); ny += getDispH(e) + gap; });
+      sorted.forEach(e => { posMap.set(e.id, { x: e.x, y: Math.round(ny) }); ny += getDispH(e) + gap; });
+    }
+
+    // 左/右 → y方向に押し出し、上/下 → x方向に押し出して重なりを解消
+    if (mode === 'left' || mode === 'right' || mode === 'top' || mode === 'bottom') {
+      const pushY = mode === 'left' || mode === 'right';
+      const sorted = [...items].sort((a, b) => {
+        const pa = posMap.get(a.id)!;
+        const pb = posMap.get(b.id)!;
+        return pushY ? pa.y - pb.y : pa.x - pb.x;
+      });
+      const placed: Equipment[] = [];
+
+      for (const item of sorted) {
+        const pos = posMap.get(item.id)!;
+        let resolved = false;
+
+        for (let iter = 0; iter < 10000; iter++) {
+          let hit = false;
+
+          // selected 同士の重なりチェック
+          for (const prev of placed) {
+            const pp = posMap.get(prev.id)!;
+            if (equipmentOverlap({ ...item, x: pos.x, y: pos.y }, { ...prev, x: pp.x, y: pp.y })) {
+              if (pushY) pos.y = Math.ceil(pp.y + getDispH(prev));
+              else       pos.x = Math.ceil(pp.x + getDispW(prev));
+              hit = true;
+              break;
+            }
+          }
+          if (hit) continue;
+
+          // non-selected との重なりチェック（同方向に押し出し）
+          for (const ns of nonSelected) {
+            if (equipmentOverlap({ ...item, x: pos.x, y: pos.y }, ns)) {
+              if (pushY) pos.y = Math.ceil(ns.y + getDispH(ns));
+              else       pos.x = Math.ceil(ns.x + getDispW(ns));
+              hit = true;
+              break;
+            }
+          }
+
+          if (!hit) { resolved = true; break; }
+        }
+
+        if (!resolved) {
+          window.alert('重なるため整列できません');
+          return;
+        }
+        placed.push(item);
+      }
     }
 
     pushEquipUndo();
-    setEquipments((prev) => prev.map((e) => { const p = newPos.get(e.id); return p ? { ...e, ...p } : e; }));
+    setEquipments((prev) => prev.map((e) => { const p = posMap.get(e.id); return p ? { ...e, ...p } : e; }));
   }, [selectedIds, equipments, setEquipments, pushEquipUndo]);
 
   // ── line handlers ─────────────────────────────────────────────────────────
