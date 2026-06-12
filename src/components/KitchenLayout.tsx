@@ -361,12 +361,13 @@ export default function KitchenLayout() {
       sorted.forEach(e => { newPos.set(e.id, { x: e.x, y: Math.round(ny) }); ny += getDispH(e) + gap; });
     }
 
-    // 整列後の仮配置で選択アイテムが他と重なるか確認
-    // 既存の重なりが解消されるケースは許可し、結果として真に重なる場合のみ中止する
-    const hypothetical = equipments.map(e => { const p = newPos.get(e.id); return p ? { ...e, ...p } : e; });
-    const wouldOverlap = hypothetical
-      .filter(a => selectedIds.has(a.id))
-      .some(sel => hypothetical.some(other => other.id !== sel.id && equipmentOverlap(sel, other)));
+    // 整列後の selected 同士の重なりのみチェック
+    // selected ↔ non-selected は無視（整列は強制再配置ツールとして扱う）
+    // pack は gap=0 保証なので selected 同士は原則重ならないが、念のため検証
+    const selectedHypo = items.map(e => { const p = newPos.get(e.id); return p ? { ...e, ...p } : e; });
+    const wouldOverlap = selectedHypo.some((sel, i) =>
+      selectedHypo.slice(i + 1).some(other => equipmentOverlap(sel, other))
+    );
     if (wouldOverlap) {
       window.alert('重なるため整列できません');
       return;
