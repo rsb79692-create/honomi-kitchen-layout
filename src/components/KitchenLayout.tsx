@@ -32,9 +32,14 @@ function getDispW(e: Equipment) { return (e.rotation === 90 || e.rotation === 27
 function getDispH(e: Equipment) { return (e.rotation === 90 || e.rotation === 270) ? e.width : e.depth; }
 
 function equipmentOverlap(a: Equipment, b: Equipment): boolean {
-  const aw = getDispW(a), ah = getDispH(a);
-  const bw = getDispW(b), bh = getDispH(b);
-  return a.x < b.x + bw && a.x + aw > b.x && a.y < b.y + bh && a.y + ah > b.y;
+  // Round to nearest integer before comparison — eliminates floating-point false positives
+  // (e.g. a width of 100.4 placed at x=50 should NOT flag touching item at x=150 as overlapping)
+  // Touching edges (ar === bx) use <= so they are NOT treated as overlap.
+  const ax = Math.round(a.x), aw = Math.round(getDispW(a));
+  const ay = Math.round(a.y), ah = Math.round(getDispH(a));
+  const bx = Math.round(b.x), bw = Math.round(getDispW(b));
+  const by = Math.round(b.y), bh = Math.round(getDispH(b));
+  return !(ax + aw <= bx || ax >= bx + bw || ay + ah <= by || ay >= by + bh);
 }
 
 type CropMode = 'kitchen' | 'equipment-list' | null;
@@ -326,22 +331,23 @@ export default function KitchenLayout() {
     const newPos = new Map<string, { x: number; y: number }>();
 
     // 左/右/上/下: 端から順に詰め込み（重なりなし保証）
+    // Math.round で幅・高さを整数化して累積し、float 誤差による微小重なりを防ぐ
     if (mode === 'left') {
       const sorted = [...items].sort((a, b) => a.x - b.x);
-      let nx = minLeft;
-      sorted.forEach(e => { newPos.set(e.id, { x: Math.round(nx), y: e.y }); nx += getDispW(e); });
+      let nx = Math.round(minLeft);
+      sorted.forEach(e => { newPos.set(e.id, { x: nx, y: e.y }); nx += Math.round(getDispW(e)); });
     } else if (mode === 'right') {
       const sorted = [...items].sort((a, b) => b.x - a.x);
-      let rx = maxRight;
-      sorted.forEach(e => { rx -= getDispW(e); newPos.set(e.id, { x: Math.round(rx), y: e.y }); });
+      let rx = Math.round(maxRight);
+      sorted.forEach(e => { rx -= Math.round(getDispW(e)); newPos.set(e.id, { x: rx, y: e.y }); });
     } else if (mode === 'top') {
       const sorted = [...items].sort((a, b) => a.y - b.y);
-      let ny = minTop;
-      sorted.forEach(e => { newPos.set(e.id, { x: e.x, y: Math.round(ny) }); ny += getDispH(e); });
+      let ny = Math.round(minTop);
+      sorted.forEach(e => { newPos.set(e.id, { x: e.x, y: ny }); ny += Math.round(getDispH(e)); });
     } else if (mode === 'bottom') {
       const sorted = [...items].sort((a, b) => b.y - a.y);
-      let by = maxBot;
-      sorted.forEach(e => { by -= getDispH(e); newPos.set(e.id, { x: e.x, y: Math.round(by) }); });
+      let by = Math.round(maxBot);
+      sorted.forEach(e => { by -= Math.round(getDispH(e)); newPos.set(e.id, { x: e.x, y: by }); });
     } else if (mode === 'h-distribute') {
       // 間隔が足りない場合は gap=0（詰め込み）
       const sorted = [...items].sort((a, b) => a.x - b.x);
@@ -355,6 +361,17 @@ export default function KitchenLayout() {
       const gap = Math.max(0, sorted.length > 1 ? (maxBot - minTop - totalH) / (sorted.length - 1) : 0);
       let ny = minTop;
       sorted.forEach(e => { newPos.set(e.id, { x: e.x, y: Math.round(ny) }); ny += getDispH(e) + gap; });
+    }
+
+    // 整列後の仮配置で選択アイテムが他と重なるか確認
+    // 既存の重なりが解消されるケースは許可し、結果として真に重なる場合のみ中止する
+    const hypothetical = equipments.map(e => { const p = newPos.get(e.id); return p ? { ...e, ...p } : e; });
+    const wouldOverlap = hypothetical
+      .filter(a => selectedIds.has(a.id))
+      .some(sel => hypothetical.some(other => other.id !== sel.id && equipmentOverlap(sel, other)));
+    if (wouldOverlap) {
+      window.alert('重なるため整列できません');
+      return;
     }
 
     pushEquipUndo();
