@@ -328,24 +328,19 @@ export default function KitchenLayout() {
     const maxBot   = Math.max(...items.map((e) => e.y + getDispH(e)));
     const newPos = new Map<string, { x: number; y: number }>();
 
-    // 左/右/上/下: 端から順に詰め込み（重なりなし保証）
-    // Math.round で幅・高さを整数化して累積し、float 誤差による微小重なりを防ぐ
+    // 左/右/上/下: 一般的な整列（端を揃える）
     if (mode === 'left') {
-      const sorted = [...items].sort((a, b) => a.x - b.x);
-      let nx = Math.round(minLeft);
-      sorted.forEach(e => { newPos.set(e.id, { x: nx, y: e.y }); nx += Math.round(getDispW(e)); });
+      // 全アイテムの左端を minLeft に揃える
+      items.forEach(e => { newPos.set(e.id, { x: Math.round(minLeft), y: e.y }); });
     } else if (mode === 'right') {
-      const sorted = [...items].sort((a, b) => b.x - a.x);
-      let rx = Math.round(maxRight);
-      sorted.forEach(e => { rx -= Math.round(getDispW(e)); newPos.set(e.id, { x: rx, y: e.y }); });
+      // 全アイテムの右端を maxRight に揃える
+      items.forEach(e => { newPos.set(e.id, { x: Math.round(maxRight - getDispW(e)), y: e.y }); });
     } else if (mode === 'top') {
-      const sorted = [...items].sort((a, b) => a.y - b.y);
-      let ny = Math.round(minTop);
-      sorted.forEach(e => { newPos.set(e.id, { x: e.x, y: ny }); ny += Math.round(getDispH(e)); });
+      // 全アイテムの上端を minTop に揃える
+      items.forEach(e => { newPos.set(e.id, { x: e.x, y: Math.round(minTop) }); });
     } else if (mode === 'bottom') {
-      const sorted = [...items].sort((a, b) => b.y - a.y);
-      let by = Math.round(maxBot);
-      sorted.forEach(e => { by -= Math.round(getDispH(e)); newPos.set(e.id, { x: e.x, y: by }); });
+      // 全アイテムの下端を maxBot に揃える
+      items.forEach(e => { newPos.set(e.id, { x: e.x, y: Math.round(maxBot - getDispH(e)) }); });
     } else if (mode === 'h-distribute') {
       // 間隔が足りない場合は gap=0（詰め込み）
       const sorted = [...items].sort((a, b) => a.x - b.x);
@@ -359,18 +354,6 @@ export default function KitchenLayout() {
       const gap = Math.max(0, sorted.length > 1 ? (maxBot - minTop - totalH) / (sorted.length - 1) : 0);
       let ny = minTop;
       sorted.forEach(e => { newPos.set(e.id, { x: e.x, y: Math.round(ny) }); ny += getDispH(e) + gap; });
-    }
-
-    // 整列後の selected 同士の重なりのみチェック
-    // selected ↔ non-selected は無視（整列は強制再配置ツールとして扱う）
-    // pack は gap=0 保証なので selected 同士は原則重ならないが、念のため検証
-    const selectedHypo = items.map(e => { const p = newPos.get(e.id); return p ? { ...e, ...p } : e; });
-    const wouldOverlap = selectedHypo.some((sel, i) =>
-      selectedHypo.slice(i + 1).some(other => equipmentOverlap(sel, other))
-    );
-    if (wouldOverlap) {
-      window.alert('重なるため整列できません');
-      return;
     }
 
     pushEquipUndo();
