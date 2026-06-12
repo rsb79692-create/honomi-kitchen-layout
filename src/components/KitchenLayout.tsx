@@ -77,6 +77,9 @@ export default function KitchenLayout() {
   const [isMappingMode, setIsMappingMode] = useState(false);
   const [mappingItem, setMappingItem] = useState<PresetItem | null>(null);
   const [mappedNumbers, setMappedNumbers] = useState<Set<number>>(new Set());
+  const [mappingDrag, setMappingDrag] = useState<{
+    startX: number; startY: number; curX: number; curY: number;
+  } | null>(null);
 
   // Reset selection when project changes
   const prevProjectId = useRef(currentProject?.id);
@@ -95,6 +98,7 @@ export default function KitchenLayout() {
       setIsMappingMode(false);
       setMappingItem(null);
       setMappedNumbers(new Set());
+      setMappingDrag(null);
     }
   }, [currentProject?.id]);
 
@@ -379,6 +383,7 @@ export default function KitchenLayout() {
   const handleStopMapping = useCallback(() => {
     setIsMappingMode(false);
     setMappingItem(null);
+    setMappingDrag(null);
   }, []);
 
   const handleSelectNextUnmapped = useCallback(() => {
@@ -386,38 +391,63 @@ export default function KitchenLayout() {
     setMappingItem(first ?? null);
   }, [mappedNumbers]);
 
-  const handleMappingCanvasClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+  const handleMappingMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (!mappingItem) return;
-    if (mappedNumbers.has(mappingItem.number)) {
-      if (!window.confirm(`「${mappingItem.name}」はすでに配置済みです。\n重ねて配置しますか？`)) return;
-    }
+    e.preventDefault();
+    e.stopPropagation();
     const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-    const cx = (e.clientX - rect.left) / canvasZoom;
-    const cy = (e.clientY - rect.top) / canvasZoom;
-    const scale = currentProject?.scalePxPerMm;
-    let w = mappingItem.width;
-    let d = mappingItem.depth;
-    if (scale && mappingItem.widthMm && mappingItem.depthMm) {
-      w = Math.round(mappingItem.widthMm * scale);
-      d = Math.round(mappingItem.depthMm * scale);
-    }
-    pushEquipUndo();
-    const newItem: Equipment = {
-      id: genId(), type: mappingItem.type, name: mappingItem.name,
-      x: Math.round(cx - w / 2), y: Math.round(cy - d / 2),
-      width: w, depth: d,
-      widthMm: mappingItem.widthMm, depthMm: mappingItem.depthMm,
-      rotation: mappingItem.rotation, memo: '',
+    const startX = (e.clientX - rect.left) / canvasZoom;
+    const startY = (e.clientY - rect.top) / canvasZoom;
+    setMappingDrag({ startX, startY, curX: startX, curY: startY });
+
+    const onMove = (ev: MouseEvent) => {
+      setMappingDrag({
+        startX, startY,
+        curX: (ev.clientX - rect.left) / canvasZoom,
+        curY: (ev.clientY - rect.top) / canvasZoom,
+      });
     };
-    setEquipments((prev) => [...prev, newItem]);
-    setSelectedIds(new Set([newItem.id]));
-    const newMapped = new Set([...mappedNumbers, mappingItem.number]);
-    setMappedNumbers(newMapped);
-    const nextItem = ASTERA_PRESET.items.find(
-      (p) => p.number > mappingItem.number && !newMapped.has(p.number),
-    );
-    setMappingItem(nextItem ?? null);
-  }, [mappingItem, mappedNumbers, canvasZoom, currentProject?.scalePxPerMm, setEquipments, pushEquipUndo]);
+
+    const onUp = (ev: MouseEvent) => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      const curX = (ev.clientX - rect.left) / canvasZoom;
+      const curY = (ev.clientY - rect.top) / canvasZoom;
+      setMappingDrag(null);
+      const w = Math.abs(curX - startX);
+      const d = Math.abs(curY - startY);
+      if (w < 10 || d < 10) return; // 小さすぎたらキャンセル
+
+      const hasDuplicate = mappedNumbers.has(mappingItem.number);
+      if (hasDuplicate) {
+        if (!window.confirm(`「${mappingItem.name}」はすでに配置済みです。\n置き換えますか？`)) return;
+      }
+      pushEquipUndo();
+      const x = Math.round(Math.min(startX, curX));
+      const y = Math.round(Math.min(startY, curY));
+      const newItem: Equipment = {
+        id: genId(), type: mappingItem.type, name: mappingItem.name,
+        x, y,
+        width: Math.round(w), depth: Math.round(d),
+        widthMm: mappingItem.widthMm, depthMm: mappingItem.depthMm,
+        rotation: 0, memo: '',
+      };
+      setEquipments((prev) => {
+        const filtered = hasDuplicate ? prev.filter((eq) => eq.name !== mappingItem.name) : prev;
+        return [...filtered, newItem];
+      });
+      setSelectedIds(new Set([newItem.id]));
+      const newMapped = new Set([...mappedNumbers, mappingItem.number]);
+      setMappedNumbers(newMapped);
+      const nextItem = ASTERA_PRESET.items.find(
+        (p) => p.number > mappingItem.number && !newMapped.has(p.number),
+      );
+      setMappingItem(nextItem ?? null);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [mappingItem, mappedNumbers, canvasZoom, setEquipments, pushEquipUndo]);
 
   // Escape キーで図面マッピングモードをキャンセル
   useEffect(() => {
@@ -867,7 +897,7 @@ export default function KitchenLayout() {
           flexShrink: 0, fontSize: 12, color: '#93c5fd', flexWrap: 'wrap',
         }}>
           {mappingItem
-            ? (<span>▶ 配置中: <strong style={{ color: '#fff' }}>{mappingItem.name}</strong> — 図面をクリックして配置 / Esc で終了</span>)
+            ? (<span>▶ 配置中: <strong style={{ color: '#fff' }}>{mappingItem.name}</strong> — 図面上でドラッグして機器の範囲を囲む / Esc で終了</span>)
             : (<span>▶ 左のリストから機器を選択してください（Esc で終了）</span>)
           }
           <span style={{ marginLeft: 'auto', fontSize: 11, color: '#60a5fa' }}>
@@ -1054,7 +1084,7 @@ export default function KitchenLayout() {
               </svg>
             )}
 
-            {/* 図面マッピング クリックオーバーレイ */}
+            {/* 図面マッピング ドラッグオーバーレイ */}
             {isMappingMode && (
               <div
                 style={{
@@ -1062,9 +1092,26 @@ export default function KitchenLayout() {
                   width: canvasW, height: canvasH,
                   zIndex: 600,
                   cursor: mappingItem ? 'crosshair' : 'not-allowed',
-                  background: mappingItem ? 'rgba(59,130,246,0.03)' : 'transparent',
                 }}
-                onClick={handleMappingCanvasClick}
+                onMouseDown={handleMappingMouseDown}
+              />
+            )}
+
+            {/* マッピングドラッグ中の矩形プレビュー */}
+            {mappingDrag && (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: Math.min(mappingDrag.startX, mappingDrag.curX) * canvasZoom,
+                  top: Math.min(mappingDrag.startY, mappingDrag.curY) * canvasZoom,
+                  width: Math.abs(mappingDrag.curX - mappingDrag.startX) * canvasZoom,
+                  height: Math.abs(mappingDrag.curY - mappingDrag.startY) * canvasZoom,
+                  border: '2px solid #0d9488',
+                  background: 'rgba(13,148,136,0.18)',
+                  pointerEvents: 'none',
+                  zIndex: 601,
+                  boxSizing: 'border-box',
+                }}
               />
             )}
 
