@@ -1,5 +1,5 @@
 'use client';
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import type { Equipment, EquipmentType } from '@/types/equipment';
 import type { KitchenLine } from '@/types/kitchenLine';
@@ -30,6 +30,12 @@ function rotateEquip(e: Equipment, dir: 1 | -1): Equipment {
 
 function getDispW(e: Equipment) { return (e.rotation === 90 || e.rotation === 270) ? e.depth : e.width; }
 function getDispH(e: Equipment) { return (e.rotation === 90 || e.rotation === 270) ? e.width : e.depth; }
+
+function equipmentOverlap(a: Equipment, b: Equipment): boolean {
+  const aw = getDispW(a), ah = getDispH(a);
+  const bw = getDispW(b), bh = getDispH(b);
+  return a.x < b.x + bw && a.x + aw > b.x && a.y < b.y + bh && a.y + ah > b.y;
+}
 
 type CropMode = 'kitchen' | 'equipment-list' | null;
 
@@ -88,6 +94,29 @@ export default function KitchenLayout() {
   const [snapEquipGrid, setSnapEquipGrid] = useState(false);
   const snapEquipGridRef = useRef(false);
   useEffect(() => { snapEquipGridRef.current = snapEquipGrid; }, [snapEquipGrid]);
+
+  // 重なり設定 (案件ごとに保存)
+  const overlapAllowed: boolean = currentProject?.overlapAllowed ?? false;
+  const overlapAllowedRef = useRef(overlapAllowed);
+  useEffect(() => { overlapAllowedRef.current = overlapAllowed; }, [overlapAllowed]);
+
+  // 重なっている機器ID（常に計算、表示・警告はovelapAllowedに依存）
+  const overlappingIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (let i = 0; i < equipments.length; i++) {
+      for (let j = i + 1; j < equipments.length; j++) {
+        if (equipmentOverlap(equipments[i], equipments[j])) {
+          ids.add(equipments[i].id);
+          ids.add(equipments[j].id);
+        }
+      }
+    }
+    return ids;
+  }, [equipments]);
+
+  // ドラッグ・リサイズ開始位置/サイズを記録するref
+  const dragStartMap = useRef<Map<string, { x: number; y: number }>>(new Map());
+  const resizeStartMap = useRef<Map<string, { w: number; d: number }>>(new Map());
 
   // 図面マッピングモード
   const [isMappingMode, setIsMappingMode] = useState(false);
@@ -255,6 +284,47 @@ export default function KitchenLayout() {
     setSelectedIds(new Set());
   }, [selectedIds, pushEquipUndo, setEquipments]);
 
+  // ── 重なり検知: ドラッグ開始・終了 ────────────────────────────────────────
+  const handleDragStart = useCallback((starts: Array<{ id: string; x: number; y: number }>) => {
+    starts.forEach(s => dragStartMap.current.set(s.id, { x: s.x, y: s.y }));
+  }, []);
+
+  const handleDragEnd = useCallback((ids: string[]) => {
+    const startMap = dragStartMap.current;
+    dragStartMap.current = new Map();
+    if (overlapAllowedRef.current) return;
+    const idSet = new Set(ids);
+    setEquipments(prev => {
+      const moved = prev.filter(e => idSet.has(e.id));
+      const others = prev.filter(e => !idSet.has(e.id));
+      if (moved.some(m => others.some(o => equipmentOverlap(m, o)))) {
+        return prev.map(e => {
+          const s = startMap.get(e.id);
+          return s ? { ...e, x: s.x, y: s.y } : e;
+        });
+      }
+      return prev;
+    });
+  }, [setEquipments]);
+
+  const handleResizeStart = useCallback((id: string, w: number, d: number) => {
+    resizeStartMap.current.set(id, { w, d });
+  }, []);
+
+  const handleResizeEnd = useCallback((id: string) => {
+    const startSize = resizeStartMap.current.get(id);
+    resizeStartMap.current.delete(id);
+    if (overlapAllowedRef.current || !startSize) return;
+    setEquipments(prev => {
+      const item = prev.find(e => e.id === id);
+      if (!item) return prev;
+      if (prev.filter(e => e.id !== id).some(o => equipmentOverlap(item, o))) {
+        return prev.map(e => e.id === id ? { ...e, width: startSize.w, depth: startSize.d } : e);
+      }
+      return prev;
+    });
+  }, [setEquipments]);
+
   const handleRotateRight = useCallback(() => {
     if (selectedIds.size === 0) return;
     pushEquipUndo();
@@ -293,6 +363,13 @@ export default function KitchenLayout() {
       const gap = sorted.length > 1 ? (maxBot - minTop - totalH) / (sorted.length - 1) : 0;
       let nextY = minTop;
       sorted.forEach((e) => { newPos.set(e.id, { x: e.x, y: Math.round(nextY) }); nextY += getDispH(e) + gap; });
+    }
+
+    // 重なりチェック（overlapAllowed=falseのとき警告）
+    if (!overlapAllowedRef.current) {
+      const hypothetical = equipments.map(e => { const p = newPos.get(e.id); return p ? { ...e, ...p } : e; });
+      const hasOverlap = hypothetical.some((a, i) => hypothetical.slice(i + 1).some(b => equipmentOverlap(a, b)));
+      if (hasOverlap && !window.confirm('この整列では機器が重なります。実行しますか？')) return;
     }
 
     pushEquipUndo();
@@ -527,6 +604,15 @@ export default function KitchenLayout() {
         widthMm: effectiveWidthMm, depthMm: effectiveDepthMm,
         rotation: 0, memo: '',
       };
+      // 重なりチェック
+      if (!overlapAllowedRef.current) {
+        const existingForCheck = hasDuplicate
+          ? equipmentsRef.current.filter(e => e.name !== resolvedName)
+          : equipmentsRef.current;
+        if (existingForCheck.some(e => equipmentOverlap(newItem, e))) {
+          if (!window.confirm(`「${newItem.name}」は既存の機器と重なっています。\n配置しますか？`)) return;
+        }
+      }
       setEquipments((prev) => {
         const filtered = hasDuplicate ? prev.filter((eq) => eq.name !== resolvedName) : prev;
         return [...filtered, newItem];
@@ -553,7 +639,7 @@ export default function KitchenLayout() {
   }, [isMappingMode, handleStopMapping]);
 
   // ── right panel resize ───────────────────────────────────────────────────
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+  const handlePanelResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
     const startW = rightWidthRef.current;
@@ -865,6 +951,19 @@ export default function KitchenLayout() {
         >
           機器一覧編集
         </button>
+        <button
+          onClick={() => updateProject({ overlapAllowed: !overlapAllowed })}
+          style={{
+            ...btnStyle(!overlapAllowed, '#10b981'),
+            fontSize: 12, padding: '4px 10px',
+            border: `1px solid ${overlapAllowed ? '#dc2626' : '#10b981'}`,
+            color: overlapAllowed ? '#dc2626' : '#10b981',
+            background: overlapAllowed ? '#450a0a' : undefined,
+          }}
+          title={overlapAllowed ? '重なり許可中 — クリックで禁止に戻す' : '重なり検知 ON — クリックで許可する'}
+        >
+          重なり{overlapAllowed ? '許可中' : '検知 ON'}
+        </button>
         {equipments.length > 0 && (
           <button
             onClick={handleDeleteAll}
@@ -1027,6 +1126,24 @@ export default function KitchenLayout() {
         </div>
       )}
 
+      {/* ── 重なり警告バナー ──────────────────────────────────────────────── */}
+      {overlappingIds.size > 0 && !overlapAllowed && (
+        <div style={{
+          background: '#fef2f2', borderBottom: '1px solid #fecaca',
+          padding: '4px 14px', display: 'flex', alignItems: 'center', gap: 10,
+          flexShrink: 0, fontSize: 12, color: '#b91c1c', flexWrap: 'wrap',
+        }}>
+          <span>⚠ 重なっている機器があります（{overlappingIds.size}個）</span>
+          <span style={{ fontSize: 11, color: '#9f1239' }}>— ドラッグで移動すると自動で戻ります</span>
+          <button
+            onClick={() => updateProject({ overlapAllowed: true })}
+            style={{ fontSize: 10, padding: '2px 8px', marginLeft: 'auto', background: '#fff', border: '1px solid #fca5a5', borderRadius: 3, color: '#b91c1c', cursor: 'pointer' }}
+          >
+            重なりを許可する
+          </button>
+        </div>
+      )}
+
       {/* ── プリセット確認バナー ──────────────────────────────────────────── */}
       {presetConfirm && (
         <div style={{
@@ -1166,10 +1283,15 @@ export default function KitchenLayout() {
                   showResizeHandles={selectedIds.size === 1 && selectedIds.has(eq.id)}
                   canvasScale={canvasZoom}
                   groupMates={mates}
+                  isOverlapping={!overlapAllowed && overlappingIds.has(eq.id)}
                   onSelectItem={handleSelectItem}
                   onMove={handleMove}
                   onMoveMultiple={handleMoveMultiple}
                   onResize={handleResize}
+                  onDragStart={handleDragStart}
+                  onDragEnd={handleDragEnd}
+                  onResizeStart={handleResizeStart}
+                  onResizeEnd={handleResizeEnd}
                 />
               );
             })}
@@ -1268,7 +1390,7 @@ export default function KitchenLayout() {
           <>
             {/* ドラッグリサイズハンドル */}
             <div
-              onMouseDown={handleResizeStart}
+              onMouseDown={handlePanelResizeStart}
               style={{
                 width: 5, flexShrink: 0, cursor: 'ew-resize',
                 background: '#c8c8c8', transition: 'background 0.15s',

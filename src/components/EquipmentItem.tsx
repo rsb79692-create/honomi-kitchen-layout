@@ -13,15 +13,22 @@ interface Props {
   showResizeHandles: boolean;
   canvasScale: number;
   groupMates: Array<{ id: string; x: number; y: number }>;
+  isOverlapping?: boolean;
   onSelectItem: (id: string, additive: boolean) => void;
   onMove: (id: string, x: number, y: number) => void;
   onMoveMultiple: (moves: Array<{ id: string; x: number; y: number }>) => void;
   onResize: (id: string, width: number, depth: number) => void;
+  onDragStart?: (starts: Array<{ id: string; x: number; y: number }>) => void;
+  onDragEnd?: (ids: string[]) => void;
+  onResizeStart?: (id: string, w: number, d: number) => void;
+  onResizeEnd?: (id: string) => void;
 }
 
 export default function EquipmentItem({
   equipment, isSelected, showResizeHandles, canvasScale,
-  groupMates, onSelectItem, onMove, onMoveMultiple, onResize,
+  groupMates, isOverlapping,
+  onSelectItem, onMove, onMoveMultiple, onResize,
+  onDragStart, onDragEnd, onResizeStart, onResizeEnd,
 }: Props) {
   const moveStart = useRef<{ mouseX: number; mouseY: number; equipX: number; equipY: number } | null>(null);
   const resizeStart = useRef<{
@@ -44,6 +51,12 @@ export default function EquipmentItem({
     const matesSnapshot = groupMates.map(m => ({ ...m }));
     moveStart.current = { mouseX: e.clientX, mouseY: e.clientY, equipX: equipment.x, equipY: equipment.y };
 
+    // Notify drag start with starting positions
+    onDragStart?.([
+      { id: equipment.id, x: equipment.x, y: equipment.y },
+      ...matesSnapshot.map(m => ({ id: m.id, x: m.x, y: m.y })),
+    ]);
+
     const onMoveHandler = (ev: MouseEvent) => {
       if (!moveStart.current) return;
       const dx = (ev.clientX - moveStart.current.mouseX) / canvasScale;
@@ -62,6 +75,8 @@ export default function EquipmentItem({
       moveStart.current = null;
       window.removeEventListener('mousemove', onMoveHandler);
       window.removeEventListener('mouseup', onUp);
+      // Notify drag end so caller can validate final position
+      onDragEnd?.([equipment.id, ...matesSnapshot.map(m => m.id)]);
     };
     window.addEventListener('mousemove', onMoveHandler);
     window.addEventListener('mouseup', onUp);
@@ -77,6 +92,9 @@ export default function EquipmentItem({
       rotation: equipment.rotation,
       dir,
     };
+
+    // Notify resize start
+    onResizeStart?.(equipment.id, equipment.width, equipment.depth);
 
     const onMoveHandler = (ev: MouseEvent) => {
       const s = resizeStart.current;
@@ -109,6 +127,8 @@ export default function EquipmentItem({
       resizeStart.current = null;
       window.removeEventListener('mousemove', onMoveHandler);
       window.removeEventListener('mouseup', onUp);
+      // Notify resize end so caller can validate final size
+      onResizeEnd?.(equipment.id);
     };
     window.addEventListener('mousemove', onMoveHandler);
     window.addEventListener('mouseup', onUp);
@@ -120,11 +140,15 @@ export default function EquipmentItem({
   const smallBox = pxW < 80 || pxH < 40;
 
   const isGrouped = !!equipment.groupId;
-  const borderColor = isSelected ? (isGrouped ? '#f59e0b' : '#3b82f6') : '#555';
-  const borderWidth = isSelected ? '2px' : '1.5px';
-  const bgColor = isSelected
-    ? (isGrouped ? 'rgba(245,158,11,0.25)' : 'rgba(59,130,246,0.35)')
-    : 'rgba(200,200,200,0.45)';
+  const borderColor = isOverlapping
+    ? '#ef4444'
+    : isSelected ? (isGrouped ? '#f59e0b' : '#3b82f6') : '#555';
+  const borderWidth = isSelected || isOverlapping ? '2px' : '1.5px';
+  const bgColor = isOverlapping
+    ? (isSelected ? 'rgba(239,68,68,0.45)' : 'rgba(239,68,68,0.22)')
+    : isSelected
+      ? (isGrouped ? 'rgba(245,158,11,0.25)' : 'rgba(59,130,246,0.35)')
+      : 'rgba(200,200,200,0.45)';
 
   return (
     <div

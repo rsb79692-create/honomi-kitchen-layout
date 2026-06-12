@@ -27,6 +27,7 @@ export interface Project {
   scalePxPerMm?: number; // 縮尺: 1mm あたりの canvas px
   mappingNames?: Record<number, string>; // 案件ごとの機器名上書き: プリセット番号 → 表示名
   equipmentCatalog?: CatalogItem[]; // 案件ごとの機器一覧データ
+  overlapAllowed?: boolean; // 機器の重なりを許可するか (デフォルト: false = 重なり禁止)
 }
 
 export function defaultProject(): Project {
