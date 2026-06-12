@@ -95,12 +95,7 @@ export default function KitchenLayout() {
   const snapEquipGridRef = useRef(false);
   useEffect(() => { snapEquipGridRef.current = snapEquipGrid; }, [snapEquipGrid]);
 
-  // 重なり設定 (案件ごとに保存)
-  const overlapAllowed: boolean = currentProject?.overlapAllowed ?? false;
-  const overlapAllowedRef = useRef(overlapAllowed);
-  useEffect(() => { overlapAllowedRef.current = overlapAllowed; }, [overlapAllowed]);
-
-  // 重なっている機器ID（常に計算、表示・警告はovelapAllowedに依存）
+  // 重なっている機器ID
   const overlappingIds = useMemo(() => {
     const ids = new Set<string>();
     for (let i = 0; i < equipments.length; i++) {
@@ -206,14 +201,11 @@ export default function KitchenLayout() {
     const sx = snapEquipGridRef.current ? Math.round(x / 10) * 10 : x;
     const sy = snapEquipGridRef.current ? Math.round(y / 10) * 10 : y;
     setEquipments((prev) => {
-      if (!overlapAllowedRef.current) {
-        const item = prev.find(e => e.id === id);
-        if (item) {
-          const others = prev.filter(e => e.id !== id);
-          // すでに重なっている状態なら移動を許可（脱出できるよう）
-          if (!others.some(o => equipmentOverlap(item, o))) {
-            if (others.some(o => equipmentOverlap({ ...item, x: sx, y: sy }, o))) return prev;
-          }
+      const item = prev.find(e => e.id === id);
+      if (item) {
+        const others = prev.filter(e => e.id !== id);
+        if (!others.some(o => equipmentOverlap(item, o))) {
+          if (others.some(o => equipmentOverlap({ ...item, x: sx, y: sy }, o))) return prev;
         }
       }
       return prev.map((e) => e.id === id ? { ...e, x: sx, y: sy } : e);
@@ -225,13 +217,11 @@ export default function KitchenLayout() {
     const snapMap = new Map(moves.map((m) => [m.id, { x: snap(m.x), y: snap(m.y) }]));
     const movedIds = new Set(moves.map(m => m.id));
     setEquipments((prev) => {
-      if (!overlapAllowedRef.current) {
-        const moved = prev.filter(e => movedIds.has(e.id));
-        const others = prev.filter(e => !movedIds.has(e.id));
-        if (!moved.some(m => others.some(o => equipmentOverlap(m, o)))) {
-          const proposed = moved.map(e => { const p = snapMap.get(e.id)!; return { ...e, x: p.x, y: p.y }; });
-          if (proposed.some(p => others.some(o => equipmentOverlap(p, o)))) return prev;
-        }
+      const moved = prev.filter(e => movedIds.has(e.id));
+      const others = prev.filter(e => !movedIds.has(e.id));
+      if (!moved.some(m => others.some(o => equipmentOverlap(m, o)))) {
+        const proposed = moved.map(e => { const p = snapMap.get(e.id)!; return { ...e, x: p.x, y: p.y }; });
+        if (proposed.some(p => others.some(o => equipmentOverlap(p, o)))) return prev;
       }
       return prev.map((e) => { const m = snapMap.get(e.id); return m ? { ...e, x: m.x, y: m.y } : e; });
     });
@@ -245,13 +235,11 @@ export default function KitchenLayout() {
     const snap = (v: number) => snapEquipGridRef.current ? Math.round(v / 10) * 10 : v;
     const sw = snap(width), sd = snap(depth);
     setEquipments((prev) => {
-      if (!overlapAllowedRef.current) {
-        const item = prev.find(e => e.id === id);
-        if (item) {
-          const others = prev.filter(e => e.id !== id);
-          if (!others.some(o => equipmentOverlap(item, o))) {
-            if (others.some(o => equipmentOverlap({ ...item, width: sw, depth: sd }, o))) return prev;
-          }
+      const item = prev.find(e => e.id === id);
+      if (item) {
+        const others = prev.filter(e => e.id !== id);
+        if (!others.some(o => equipmentOverlap(item, o))) {
+          if (others.some(o => equipmentOverlap({ ...item, width: sw, depth: sd }, o))) return prev;
         }
       }
       return prev.map((e) => e.id === id ? { ...e, width: sw, depth: sd } : e);
@@ -337,30 +325,36 @@ export default function KitchenLayout() {
     const maxBot   = Math.max(...items.map((e) => e.y + getDispH(e)));
     const newPos = new Map<string, { x: number; y: number }>();
 
-    if (mode === 'left')   { items.forEach((e) => newPos.set(e.id, { x: minLeft, y: e.y })); }
-    else if (mode === 'right')  { items.forEach((e) => newPos.set(e.id, { x: maxRight - getDispW(e), y: e.y })); }
-    else if (mode === 'top')    { items.forEach((e) => newPos.set(e.id, { x: e.x, y: minTop })); }
-    else if (mode === 'bottom') { items.forEach((e) => newPos.set(e.id, { x: e.x, y: maxBot - getDispH(e) })); }
-    else if (mode === 'h-distribute') {
+    // 左/右/上/下: 端から順に詰め込み（重なりなし保証）
+    if (mode === 'left') {
+      const sorted = [...items].sort((a, b) => a.x - b.x);
+      let nx = minLeft;
+      sorted.forEach(e => { newPos.set(e.id, { x: Math.round(nx), y: e.y }); nx += getDispW(e); });
+    } else if (mode === 'right') {
+      const sorted = [...items].sort((a, b) => b.x - a.x);
+      let rx = maxRight;
+      sorted.forEach(e => { rx -= getDispW(e); newPos.set(e.id, { x: Math.round(rx), y: e.y }); });
+    } else if (mode === 'top') {
+      const sorted = [...items].sort((a, b) => a.y - b.y);
+      let ny = minTop;
+      sorted.forEach(e => { newPos.set(e.id, { x: e.x, y: Math.round(ny) }); ny += getDispH(e); });
+    } else if (mode === 'bottom') {
+      const sorted = [...items].sort((a, b) => b.y - a.y);
+      let by = maxBot;
+      sorted.forEach(e => { by -= getDispH(e); newPos.set(e.id, { x: e.x, y: Math.round(by) }); });
+    } else if (mode === 'h-distribute') {
+      // 間隔が足りない場合は gap=0（詰め込み）
       const sorted = [...items].sort((a, b) => a.x - b.x);
       const totalW = sorted.reduce((s, e) => s + getDispW(e), 0);
-      const gap = sorted.length > 1 ? (maxRight - minLeft - totalW) / (sorted.length - 1) : 0;
-      let nextX = minLeft;
-      sorted.forEach((e) => { newPos.set(e.id, { x: Math.round(nextX), y: e.y }); nextX += getDispW(e) + gap; });
-    }
-    else if (mode === 'v-distribute') {
+      const gap = Math.max(0, sorted.length > 1 ? (maxRight - minLeft - totalW) / (sorted.length - 1) : 0);
+      let nx = minLeft;
+      sorted.forEach(e => { newPos.set(e.id, { x: Math.round(nx), y: e.y }); nx += getDispW(e) + gap; });
+    } else if (mode === 'v-distribute') {
       const sorted = [...items].sort((a, b) => a.y - b.y);
       const totalH = sorted.reduce((s, e) => s + getDispH(e), 0);
-      const gap = sorted.length > 1 ? (maxBot - minTop - totalH) / (sorted.length - 1) : 0;
-      let nextY = minTop;
-      sorted.forEach((e) => { newPos.set(e.id, { x: e.x, y: Math.round(nextY) }); nextY += getDispH(e) + gap; });
-    }
-
-    // 重なりチェック（overlapAllowed=falseのとき警告）
-    if (!overlapAllowedRef.current) {
-      const hypothetical = equipments.map(e => { const p = newPos.get(e.id); return p ? { ...e, ...p } : e; });
-      const hasOverlap = hypothetical.some((a, i) => hypothetical.slice(i + 1).some(b => equipmentOverlap(a, b)));
-      if (hasOverlap && !window.confirm('この整列では機器が重なります。実行しますか？')) return;
+      const gap = Math.max(0, sorted.length > 1 ? (maxBot - minTop - totalH) / (sorted.length - 1) : 0);
+      let ny = minTop;
+      sorted.forEach(e => { newPos.set(e.id, { x: e.x, y: Math.round(ny) }); ny += getDispH(e) + gap; });
     }
 
     pushEquipUndo();
@@ -595,13 +589,14 @@ export default function KitchenLayout() {
         widthMm: effectiveWidthMm, depthMm: effectiveDepthMm,
         rotation: 0, memo: '',
       };
-      // 重なりチェック
-      if (!overlapAllowedRef.current) {
+      // 重なりチェック（重なる場合は配置不可）
+      {
         const existingForCheck = hasDuplicate
           ? equipmentsRef.current.filter(e => e.name !== resolvedName)
           : equipmentsRef.current;
         if (existingForCheck.some(e => equipmentOverlap(newItem, e))) {
-          if (!window.confirm(`「${newItem.name}」は既存の機器と重なっています。\n配置しますか？`)) return;
+          window.alert(`「${newItem.name}」は既存の機器と重なるため配置できません。\n別の位置にドラッグしてください。`);
+          return;
         }
       }
       setEquipments((prev) => {
@@ -942,19 +937,6 @@ export default function KitchenLayout() {
         >
           機器一覧編集
         </button>
-        <button
-          onClick={() => updateProject({ overlapAllowed: !overlapAllowed })}
-          style={{
-            ...btnStyle(!overlapAllowed, '#10b981'),
-            fontSize: 12, padding: '4px 10px',
-            border: `1px solid ${overlapAllowed ? '#dc2626' : '#10b981'}`,
-            color: overlapAllowed ? '#dc2626' : '#10b981',
-            background: overlapAllowed ? '#450a0a' : undefined,
-          }}
-          title={overlapAllowed ? '重なり許可中 — クリックで禁止に戻す' : '重なり検知 ON — クリックで許可する'}
-        >
-          重なり{overlapAllowed ? '許可中' : '検知 ON'}
-        </button>
         {equipments.length > 0 && (
           <button
             onClick={handleDeleteAll}
@@ -1118,20 +1100,13 @@ export default function KitchenLayout() {
       )}
 
       {/* ── 重なり警告バナー ──────────────────────────────────────────────── */}
-      {overlappingIds.size > 0 && !overlapAllowed && (
+      {overlappingIds.size > 0 && (
         <div style={{
           background: '#fef2f2', borderBottom: '1px solid #fecaca',
           padding: '4px 14px', display: 'flex', alignItems: 'center', gap: 10,
-          flexShrink: 0, fontSize: 12, color: '#b91c1c', flexWrap: 'wrap',
+          flexShrink: 0, fontSize: 12, color: '#b91c1c',
         }}>
-          <span>⚠ 重なっている機器があります（{overlappingIds.size}個）</span>
-          <span style={{ fontSize: 11, color: '#9f1239' }}>— 移動して重なりを解消してください</span>
-          <button
-            onClick={() => updateProject({ overlapAllowed: true })}
-            style={{ fontSize: 10, padding: '2px 8px', marginLeft: 'auto', background: '#fff', border: '1px solid #fca5a5', borderRadius: 3, color: '#b91c1c', cursor: 'pointer' }}
-          >
-            重なりを許可する
-          </button>
+          <span>⚠ 重なっている機器があります（{overlappingIds.size}個）— 移動して解消してください</span>
         </div>
       )}
 
@@ -1274,7 +1249,7 @@ export default function KitchenLayout() {
                   showResizeHandles={selectedIds.size === 1 && selectedIds.has(eq.id)}
                   canvasScale={canvasZoom}
                   groupMates={mates}
-                  isOverlapping={!overlapAllowed && overlappingIds.has(eq.id)}
+                  isOverlapping={overlappingIds.has(eq.id)}
                   onSelectItem={handleSelectItem}
                   onMove={handleMove}
                   onMoveMultiple={handleMoveMultiple}
