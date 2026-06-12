@@ -64,6 +64,14 @@ export default function KitchenLayout() {
   const [scalePoint1, setScalePoint1] = useState<{ x: number; y: number } | null>(null);
   const [scaleMousePos, setScaleMousePos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
+  // 機器アクション Undo スタック（最大10ステップ）
+  const [equipUndoStack, setEquipUndoStack] = useState<Equipment[][]>([]);
+
+  // Shift+ドラッグ範囲選択
+  const [dragSelect, setDragSelect] = useState<{
+    startX: number; startY: number; curX: number; curY: number;
+  } | null>(null);
+
   // Reset selection when project changes
   const prevProjectId = useRef(currentProject?.id);
   useEffect(() => {
@@ -76,6 +84,8 @@ export default function KitchenLayout() {
       setPdfSize(null);
       setIsSettingScale(false);
       setScalePoint1(null);
+      setEquipUndoStack([]);
+      setDragSelect(null);
     }
   }, [currentProject?.id]);
 
@@ -153,10 +163,30 @@ export default function KitchenLayout() {
     setEquipments((prev) => prev.map((e) => e.id === id ? { ...e, width, depth } : e));
   }, [setEquipments]);
 
+  // ── 機器 Undo ─────────────────────────────────────────────────────────────
+  // ref でスナップショットを取ることで pushEquipUndo を安定した参照に保つ
+  const equipmentsRef = useRef<Equipment[]>(equipments);
+  useEffect(() => { equipmentsRef.current = equipments; }, [equipments]);
+
+  const pushEquipUndo = useCallback(() => {
+    setEquipUndoStack((prev) => [...prev.slice(-9), equipmentsRef.current]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleEquipUndo = useCallback(() => {
+    setEquipUndoStack((prev) => {
+      if (prev.length === 0) return prev;
+      const restored = prev[prev.length - 1];
+      setEquipments(restored);
+      return prev.slice(0, -1);
+    });
+  }, [setEquipments]);
+
   const handleDelete = useCallback((id: string) => {
+    pushEquipUndo();
     setEquipments((prev) => prev.filter((e) => e.id !== id));
     setSelectedIds(new Set());
-  }, [setEquipments]);
+  }, [pushEquipUndo, setEquipments]);
 
   const handleGroup = useCallback(() => {
     if (selectedIds.size < 2) return;
@@ -175,6 +205,21 @@ export default function KitchenLayout() {
       );
     });
   }, [selectedIds, setEquipments]);
+
+  const handleDeleteAll = useCallback(() => {
+    if (equipments.length === 0) return;
+    if (!window.confirm(`配置済み機器をすべて削除しますか？（${equipments.length}件）`)) return;
+    pushEquipUndo();
+    setEquipments([]);
+    setSelectedIds(new Set());
+  }, [equipments, pushEquipUndo, setEquipments]);
+
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    pushEquipUndo();
+    setEquipments((prev) => prev.filter((e) => !selectedIds.has(e.id)));
+    setSelectedIds(new Set());
+  }, [selectedIds, pushEquipUndo, setEquipments]);
 
   // ── line handlers ─────────────────────────────────────────────────────────
   const handleSelectLine = useCallback((id: string | null) => {
@@ -234,6 +279,78 @@ export default function KitchenLayout() {
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, [isEditingOutline]);
+
+  // 機器 Undo / Delete キー（アウトライン編集中は除外）
+  const handleEquipUndoRef = useRef(handleEquipUndo);
+  const handleDeleteSelectedRef = useRef(handleDeleteSelected);
+  useEffect(() => { handleEquipUndoRef.current = handleEquipUndo; }, [handleEquipUndo]);
+  useEffect(() => { handleDeleteSelectedRef.current = handleDeleteSelected; }, [handleDeleteSelected]);
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement ||
+          e.target instanceof HTMLTextAreaElement ||
+          e.target instanceof HTMLSelectElement) return;
+      if (isEditingOutline) return;
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        handleEquipUndoRef.current();
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        handleDeleteSelectedRef.current();
+      }
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [isEditingOutline]);
+
+  // ── Shift+ドラッグ範囲選択 ───────────────────────────────────────────────
+  const handleCanvasBgMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (isEditingOutline || isSettingScale) return;
+    if (!e.shiftKey) {
+      setSelectedIds(new Set());
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const startX = (e.clientX - rect.left) / canvasZoom;
+    const startY = (e.clientY - rect.top) / canvasZoom;
+    setDragSelect({ startX, startY, curX: startX, curY: startY });
+
+    const snapshot = equipmentsRef.current;
+
+    const onMove = (ev: MouseEvent) => {
+      const curX = (ev.clientX - rect.left) / canvasZoom;
+      const curY = (ev.clientY - rect.top) / canvasZoom;
+      setDragSelect({ startX, startY, curX, curY });
+    };
+    const onUp = (ev: MouseEvent) => {
+      const curX = (ev.clientX - rect.left) / canvasZoom;
+      const curY = (ev.clientY - rect.top) / canvasZoom;
+      const selLeft = Math.min(startX, curX);
+      const selTop = Math.min(startY, curY);
+      const selRight = Math.max(startX, curX);
+      const selBottom = Math.max(startY, curY);
+      if (selRight - selLeft > 4 || selBottom - selTop > 4) {
+        const selected = new Set<string>();
+        for (const eq of snapshot) {
+          const eW = eq.rotation === 0 ? eq.width : eq.depth;
+          const eH = eq.rotation === 0 ? eq.depth : eq.width;
+          if (eq.x < selRight && eq.x + eW > selLeft && eq.y < selBottom && eq.y + eH > selTop) {
+            selected.add(eq.id);
+          }
+        }
+        setSelectedIds(selected);
+      } else {
+        setSelectedIds(new Set());
+      }
+      setDragSelect(null);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [isEditingOutline, isSettingScale, canvasZoom]);
 
   // ── right panel resize ───────────────────────────────────────────────────
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
@@ -532,6 +649,15 @@ export default function KitchenLayout() {
         >
           図面から機器を作成
         </button>
+        {equipments.length > 0 && (
+          <button
+            onClick={handleDeleteAll}
+            style={{ ...btnStyle(), fontSize: 12, padding: '4px 10px', background: '#b91c1c', borderColor: '#991b1b', color: '#fff' }}
+            title={`配置済み機器 ${equipments.length} 件をすべて削除`}
+          >
+            機器を全削除
+          </button>
+        )}
       </div>
 
       {/* ── Header row 2: display toggles + tools ────────────────────────── */}
@@ -616,6 +742,15 @@ export default function KitchenLayout() {
 
         <div style={{ width: 1, height: 18, background: '#444' }} />
 
+        {equipUndoStack.length > 0 && (
+          <button
+            onClick={handleEquipUndo}
+            style={{ ...btnStyle(), fontSize: 11, padding: '4px 8px' }}
+            title="機器配置を1ステップ戻す (Ctrl+Z)"
+          >
+            機器Undo ({equipUndoStack.length})
+          </button>
+        )}
         <button onClick={handleExport} style={btnStyle()}>PNG出力</button>
         <button onClick={() => window.print()} style={btnStyle()}>印刷</button>
       </div>
@@ -726,6 +861,7 @@ export default function KitchenLayout() {
           <div
             ref={canvasRef}
             style={{ position: 'relative', width: canvasW, height: canvasH, flexShrink: 0, background: '#fff' }}
+            onMouseDown={handleCanvasBgMouseDown}
             onClick={(e) => e.stopPropagation()}
           >
             <PdfBackground
@@ -799,6 +935,24 @@ export default function KitchenLayout() {
                 {/* 透明ヒットエリア */}
                 <rect x={0} y={0} width={canvasBaseW} height={canvasBaseH} fill="transparent" />
               </svg>
+            )}
+
+            {/* Shift+ドラッグ 範囲選択矩形 */}
+            {dragSelect && (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: Math.min(dragSelect.startX, dragSelect.curX) * canvasZoom,
+                  top: Math.min(dragSelect.startY, dragSelect.curY) * canvasZoom,
+                  width: Math.abs(dragSelect.curX - dragSelect.startX) * canvasZoom,
+                  height: Math.abs(dragSelect.curY - dragSelect.startY) * canvasZoom,
+                  border: '1.5px dashed #3b82f6',
+                  background: 'rgba(59,130,246,0.08)',
+                  pointerEvents: 'none',
+                  zIndex: 400,
+                  boxSizing: 'border-box',
+                }}
+              />
             )}
 
             {groupBox && (
