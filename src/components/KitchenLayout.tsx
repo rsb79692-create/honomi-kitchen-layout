@@ -6,10 +6,11 @@ import type { KitchenLine } from '@/types/kitchenLine';
 import type { CropRegion } from '@/types/project';
 import { useProjects } from '@/hooks/useProjects';
 import { ASTERA_PRESET } from '@/data/presets';
-import type { KitchenPreset } from '@/data/presets';
+import type { KitchenPreset, PresetItem } from '@/data/presets';
 import EquipmentItem from './EquipmentItem';
 import KitchenLineEditor from './KitchenLineEditor';
 import LeftPanel from './LeftPanel';
+import MappingPanel from './MappingPanel';
 import RightPanel from './RightPanel';
 import EquipmentListPanel from './EquipmentListPanel';
 
@@ -72,6 +73,11 @@ export default function KitchenLayout() {
     startX: number; startY: number; curX: number; curY: number;
   } | null>(null);
 
+  // 図面マッピングモード
+  const [isMappingMode, setIsMappingMode] = useState(false);
+  const [mappingItem, setMappingItem] = useState<PresetItem | null>(null);
+  const [mappedNumbers, setMappedNumbers] = useState<Set<number>>(new Set());
+
   // Reset selection when project changes
   const prevProjectId = useRef(currentProject?.id);
   useEffect(() => {
@@ -86,6 +92,9 @@ export default function KitchenLayout() {
       setScalePoint1(null);
       setEquipUndoStack([]);
       setDragSelect(null);
+      setIsMappingMode(false);
+      setMappingItem(null);
+      setMappedNumbers(new Set());
     }
   }, [currentProject?.id]);
 
@@ -305,7 +314,7 @@ export default function KitchenLayout() {
 
   // ── Shift+ドラッグ範囲選択 ───────────────────────────────────────────────
   const handleCanvasBgMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (isEditingOutline || isSettingScale) return;
+    if (isEditingOutline || isSettingScale || isMappingMode) return;
     if (!e.shiftKey) {
       setSelectedIds(new Set());
       return;
@@ -350,7 +359,73 @@ export default function KitchenLayout() {
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [isEditingOutline, isSettingScale, canvasZoom]);
+  }, [isEditingOutline, isSettingScale, isMappingMode, canvasZoom]);
+
+  // ── 図面マッピング ────────────────────────────────────────────────────────
+  const handleStartMapping = useCallback(() => {
+    const detected = new Set<number>();
+    for (const presetItem of ASTERA_PRESET.items) {
+      if (equipmentsRef.current.some((eq) => eq.name === presetItem.name)) {
+        detected.add(presetItem.number);
+      }
+    }
+    setMappedNumbers(detected);
+    const firstUnplaced = ASTERA_PRESET.items.find((p) => !detected.has(p.number));
+    setMappingItem(firstUnplaced ?? ASTERA_PRESET.items[0]);
+    setIsMappingMode(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleStopMapping = useCallback(() => {
+    setIsMappingMode(false);
+    setMappingItem(null);
+  }, []);
+
+  const handleSelectNextUnmapped = useCallback(() => {
+    const first = ASTERA_PRESET.items.find((p) => !mappedNumbers.has(p.number));
+    setMappingItem(first ?? null);
+  }, [mappedNumbers]);
+
+  const handleMappingCanvasClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!mappingItem) return;
+    if (mappedNumbers.has(mappingItem.number)) {
+      if (!window.confirm(`「${mappingItem.name}」はすでに配置済みです。\n重ねて配置しますか？`)) return;
+    }
+    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const cx = (e.clientX - rect.left) / canvasZoom;
+    const cy = (e.clientY - rect.top) / canvasZoom;
+    const scale = currentProject?.scalePxPerMm;
+    let w = mappingItem.width;
+    let d = mappingItem.depth;
+    if (scale && mappingItem.widthMm && mappingItem.depthMm) {
+      w = Math.round(mappingItem.widthMm * scale);
+      d = Math.round(mappingItem.depthMm * scale);
+    }
+    pushEquipUndo();
+    const newItem: Equipment = {
+      id: genId(), type: mappingItem.type, name: mappingItem.name,
+      x: Math.round(cx - w / 2), y: Math.round(cy - d / 2),
+      width: w, depth: d,
+      widthMm: mappingItem.widthMm, depthMm: mappingItem.depthMm,
+      rotation: mappingItem.rotation, memo: '',
+    };
+    setEquipments((prev) => [...prev, newItem]);
+    setSelectedIds(new Set([newItem.id]));
+    const newMapped = new Set([...mappedNumbers, mappingItem.number]);
+    setMappedNumbers(newMapped);
+    const nextItem = ASTERA_PRESET.items.find(
+      (p) => p.number > mappingItem.number && !newMapped.has(p.number),
+    );
+    setMappingItem(nextItem ?? null);
+  }, [mappingItem, mappedNumbers, canvasZoom, currentProject?.scalePxPerMm, setEquipments, pushEquipUndo]);
+
+  // Escape キーで図面マッピングモードをキャンセル
+  useEffect(() => {
+    if (!isMappingMode) return;
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') handleStopMapping(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [isMappingMode, handleStopMapping]);
 
   // ── right panel resize ───────────────────────────────────────────────────
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
@@ -643,11 +718,18 @@ export default function KitchenLayout() {
         <div style={{ width: 1, height: 20, background: '#444', margin: '0 4px' }} />
 
         <button
+          onClick={handleStartMapping}
+          style={{ ...btnStyle(isMappingMode, '#0d9488'), fontSize: 12, padding: '4px 10px', background: isMappingMode ? '#0d9488' : '#0f766e', borderColor: '#0d9488', color: '#fff' }}
+          title="リストから機器を選んで図面をクリックして配置"
+        >
+          図面マッピング{isMappingMode ? ' ON' : ''}
+        </button>
+        <button
           onClick={() => handlePresetButtonClick(ASTERA_PRESET)}
           style={{ ...btnStyle(), fontSize: 12, padding: '4px 10px', background: '#7c3aed', borderColor: '#6d28d9', color: '#fff' }}
           title="機器26点を図面上の見た目位置に初期配置（手動調整前提）"
         >
-          図面通り配置
+          簡易自動配置
         </button>
         {equipments.length > 0 && (
           <button
@@ -777,6 +859,29 @@ export default function KitchenLayout() {
         </div>
       )}
 
+      {/* ── 図面マッピングモード ヒントバー ──────────────────────────────── */}
+      {isMappingMode && (
+        <div style={{
+          background: '#0c1a2e', borderBottom: '1px solid #1d4ed8',
+          padding: '5px 14px', display: 'flex', alignItems: 'center', gap: 12,
+          flexShrink: 0, fontSize: 12, color: '#93c5fd', flexWrap: 'wrap',
+        }}>
+          {mappingItem
+            ? (<span>▶ 配置中: <strong style={{ color: '#fff' }}>{mappingItem.name}</strong> — 図面をクリックして配置 / Esc で終了</span>)
+            : (<span>▶ 左のリストから機器を選択してください（Esc で終了）</span>)
+          }
+          <span style={{ marginLeft: 'auto', fontSize: 11, color: '#60a5fa' }}>
+            {mappedNumbers.size} / {ASTERA_PRESET.items.length} 配置済み
+          </span>
+          <button
+            onClick={handleStopMapping}
+            style={{ fontSize: 11, padding: '2px 8px', background: 'none', border: '1px solid #60a5fa', borderRadius: 3, color: '#93c5fd', cursor: 'pointer' }}
+          >
+            終了
+          </button>
+        </div>
+      )}
+
       {/* ── プリセット確認バナー ──────────────────────────────────────────── */}
       {presetConfirm && (
         <div style={{
@@ -842,7 +947,19 @@ export default function KitchenLayout() {
 
       {/* ── Main area ─────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <LeftPanel onAdd={handleAdd} />
+        {isMappingMode ? (
+          <MappingPanel
+            preset={ASTERA_PRESET}
+            mappedNumbers={mappedNumbers}
+            activeItem={mappingItem}
+            scalePxPerMm={currentProject?.scalePxPerMm}
+            onSelect={setMappingItem}
+            onSelectNext={handleSelectNextUnmapped}
+            onExit={handleStopMapping}
+          />
+        ) : (
+          <LeftPanel onAdd={handleAdd} />
+        )}
 
         {/* Canvas */}
         <div
@@ -935,6 +1052,20 @@ export default function KitchenLayout() {
                 {/* 透明ヒットエリア */}
                 <rect x={0} y={0} width={canvasBaseW} height={canvasBaseH} fill="transparent" />
               </svg>
+            )}
+
+            {/* 図面マッピング クリックオーバーレイ */}
+            {isMappingMode && (
+              <div
+                style={{
+                  position: 'absolute', top: 0, left: 0,
+                  width: canvasW, height: canvasH,
+                  zIndex: 600,
+                  cursor: mappingItem ? 'crosshair' : 'not-allowed',
+                  background: mappingItem ? 'rgba(59,130,246,0.03)' : 'transparent',
+                }}
+                onClick={handleMappingCanvasClick}
+              />
             )}
 
             {/* Shift+ドラッグ 範囲選択矩形 */}
