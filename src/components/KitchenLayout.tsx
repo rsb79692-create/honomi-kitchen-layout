@@ -391,6 +391,12 @@ export default function KitchenLayout() {
     setMappingItem(first ?? null);
   }, [mappedNumbers]);
 
+  const handleMappingNameEdit = useCallback((number: number, name: string) => {
+    updateProject((prev) => ({
+      mappingNames: { ...(prev.mappingNames ?? {}), [number]: name },
+    }));
+  }, [updateProject]);
+
   const handleMappingMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (!mappingItem) return;
     e.preventDefault();
@@ -425,8 +431,9 @@ export default function KitchenLayout() {
       pushEquipUndo();
       const x = Math.round(Math.min(startX, curX));
       const y = Math.round(Math.min(startY, curY));
+      const resolvedName = currentProject?.mappingNames?.[mappingItem.number] ?? mappingItem.name;
       const newItem: Equipment = {
-        id: genId(), type: mappingItem.type, name: mappingItem.name,
+        id: genId(), type: mappingItem.type, name: resolvedName,
         x, y,
         width: Math.round(w), depth: Math.round(d),
         widthMm: mappingItem.widthMm, depthMm: mappingItem.depthMm,
@@ -447,7 +454,7 @@ export default function KitchenLayout() {
 
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [mappingItem, mappedNumbers, canvasZoom, setEquipments, pushEquipUndo]);
+  }, [mappingItem, mappedNumbers, canvasZoom, currentProject?.mappingNames, setEquipments, pushEquipUndo]);
 
   // Escape キーで図面マッピングモードをキャンセル
   useEffect(() => {
@@ -983,8 +990,10 @@ export default function KitchenLayout() {
             mappedNumbers={mappedNumbers}
             activeItem={mappingItem}
             scalePxPerMm={currentProject?.scalePxPerMm}
+            mappingNames={currentProject?.mappingNames ?? {}}
             onSelect={setMappingItem}
             onSelectNext={handleSelectNextUnmapped}
+            onNameEdit={handleMappingNameEdit}
             onExit={handleStopMapping}
           />
         ) : (

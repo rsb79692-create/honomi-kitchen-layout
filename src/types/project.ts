@@ -24,6 +24,7 @@ export interface Project {
   showEquipmentList: boolean;
   canvasZoom: number; // 0.5 – 2.0、10% 刻み
   scalePxPerMm?: number; // 縮尺: 1mm あたりの canvas px
+  mappingNames?: Record<number, string>; // 案件ごとの機器名上書き: プリセット番号 → 表示名
 }
 
 export function defaultProject(): Project {

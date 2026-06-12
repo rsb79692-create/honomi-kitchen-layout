@@ -2,7 +2,8 @@ import type { EquipmentType } from '@/types/equipment';
 
 export interface PresetItem {
   number: number;
-  name: string;
+  name: string;     // 機器一覧表と一致させる正式名（案件ごとに上書き可能）
+  subName?: string; // 補足メモ（例: "下処理用"）
   type: EquipmentType;
   x: number;        // 図面上の見た目位置 x (canvas px)
   y: number;        // 図面上の見た目位置 y (canvas px)
