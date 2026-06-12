@@ -114,9 +114,6 @@ export default function KitchenLayout() {
     return ids;
   }, [equipments]);
 
-  // ドラッグ・リサイズ開始位置/サイズを記録するref
-  const dragStartMap = useRef<Map<string, { x: number; y: number }>>(new Map());
-  const resizeStartMap = useRef<Map<string, { w: number; d: number }>>(new Map());
 
   // 図面マッピングモード
   const [isMappingMode, setIsMappingMode] = useState(false);
@@ -208,13 +205,36 @@ export default function KitchenLayout() {
   const handleMove = useCallback((id: string, x: number, y: number) => {
     const sx = snapEquipGridRef.current ? Math.round(x / 10) * 10 : x;
     const sy = snapEquipGridRef.current ? Math.round(y / 10) * 10 : y;
-    setEquipments((prev) => prev.map((e) => e.id === id ? { ...e, x: sx, y: sy } : e));
+    setEquipments((prev) => {
+      if (!overlapAllowedRef.current) {
+        const item = prev.find(e => e.id === id);
+        if (item) {
+          const others = prev.filter(e => e.id !== id);
+          // すでに重なっている状態なら移動を許可（脱出できるよう）
+          if (!others.some(o => equipmentOverlap(item, o))) {
+            if (others.some(o => equipmentOverlap({ ...item, x: sx, y: sy }, o))) return prev;
+          }
+        }
+      }
+      return prev.map((e) => e.id === id ? { ...e, x: sx, y: sy } : e);
+    });
   }, [setEquipments]);
 
   const handleMoveMultiple = useCallback((moves: Array<{ id: string; x: number; y: number }>) => {
     const snap = (v: number) => snapEquipGridRef.current ? Math.round(v / 10) * 10 : v;
-    const map = new Map(moves.map((m) => [m.id, { x: snap(m.x), y: snap(m.y) }]));
-    setEquipments((prev) => prev.map((e) => { const m = map.get(e.id); return m ? { ...e, x: m.x, y: m.y } : e; }));
+    const snapMap = new Map(moves.map((m) => [m.id, { x: snap(m.x), y: snap(m.y) }]));
+    const movedIds = new Set(moves.map(m => m.id));
+    setEquipments((prev) => {
+      if (!overlapAllowedRef.current) {
+        const moved = prev.filter(e => movedIds.has(e.id));
+        const others = prev.filter(e => !movedIds.has(e.id));
+        if (!moved.some(m => others.some(o => equipmentOverlap(m, o)))) {
+          const proposed = moved.map(e => { const p = snapMap.get(e.id)!; return { ...e, x: p.x, y: p.y }; });
+          if (proposed.some(p => others.some(o => equipmentOverlap(p, o)))) return prev;
+        }
+      }
+      return prev.map((e) => { const m = snapMap.get(e.id); return m ? { ...e, x: m.x, y: m.y } : e; });
+    });
   }, [setEquipments]);
 
   const handleUpdate = useCallback((updated: Equipment) => {
@@ -223,7 +243,19 @@ export default function KitchenLayout() {
 
   const handleResize = useCallback((id: string, width: number, depth: number) => {
     const snap = (v: number) => snapEquipGridRef.current ? Math.round(v / 10) * 10 : v;
-    setEquipments((prev) => prev.map((e) => e.id === id ? { ...e, width: snap(width), depth: snap(depth) } : e));
+    const sw = snap(width), sd = snap(depth);
+    setEquipments((prev) => {
+      if (!overlapAllowedRef.current) {
+        const item = prev.find(e => e.id === id);
+        if (item) {
+          const others = prev.filter(e => e.id !== id);
+          if (!others.some(o => equipmentOverlap(item, o))) {
+            if (others.some(o => equipmentOverlap({ ...item, width: sw, depth: sd }, o))) return prev;
+          }
+        }
+      }
+      return prev.map((e) => e.id === id ? { ...e, width: sw, depth: sd } : e);
+    });
   }, [setEquipments]);
 
   // ── 機器 Undo ─────────────────────────────────────────────────────────────
@@ -283,47 +315,6 @@ export default function KitchenLayout() {
     setEquipments((prev) => prev.filter((e) => !selectedIds.has(e.id)));
     setSelectedIds(new Set());
   }, [selectedIds, pushEquipUndo, setEquipments]);
-
-  // ── 重なり検知: ドラッグ開始・終了 ────────────────────────────────────────
-  const handleDragStart = useCallback((starts: Array<{ id: string; x: number; y: number }>) => {
-    starts.forEach(s => dragStartMap.current.set(s.id, { x: s.x, y: s.y }));
-  }, []);
-
-  const handleDragEnd = useCallback((ids: string[]) => {
-    const startMap = dragStartMap.current;
-    dragStartMap.current = new Map();
-    if (overlapAllowedRef.current) return;
-    const idSet = new Set(ids);
-    setEquipments(prev => {
-      const moved = prev.filter(e => idSet.has(e.id));
-      const others = prev.filter(e => !idSet.has(e.id));
-      if (moved.some(m => others.some(o => equipmentOverlap(m, o)))) {
-        return prev.map(e => {
-          const s = startMap.get(e.id);
-          return s ? { ...e, x: s.x, y: s.y } : e;
-        });
-      }
-      return prev;
-    });
-  }, [setEquipments]);
-
-  const handleResizeStart = useCallback((id: string, w: number, d: number) => {
-    resizeStartMap.current.set(id, { w, d });
-  }, []);
-
-  const handleResizeEnd = useCallback((id: string) => {
-    const startSize = resizeStartMap.current.get(id);
-    resizeStartMap.current.delete(id);
-    if (overlapAllowedRef.current || !startSize) return;
-    setEquipments(prev => {
-      const item = prev.find(e => e.id === id);
-      if (!item) return prev;
-      if (prev.filter(e => e.id !== id).some(o => equipmentOverlap(item, o))) {
-        return prev.map(e => e.id === id ? { ...e, width: startSize.w, depth: startSize.d } : e);
-      }
-      return prev;
-    });
-  }, [setEquipments]);
 
   const handleRotateRight = useCallback(() => {
     if (selectedIds.size === 0) return;
@@ -1134,7 +1125,7 @@ export default function KitchenLayout() {
           flexShrink: 0, fontSize: 12, color: '#b91c1c', flexWrap: 'wrap',
         }}>
           <span>⚠ 重なっている機器があります（{overlappingIds.size}個）</span>
-          <span style={{ fontSize: 11, color: '#9f1239' }}>— ドラッグで移動すると自動で戻ります</span>
+          <span style={{ fontSize: 11, color: '#9f1239' }}>— 移動して重なりを解消してください</span>
           <button
             onClick={() => updateProject({ overlapAllowed: true })}
             style={{ fontSize: 10, padding: '2px 8px', marginLeft: 'auto', background: '#fff', border: '1px solid #fca5a5', borderRadius: 3, color: '#b91c1c', cursor: 'pointer' }}
@@ -1288,10 +1279,6 @@ export default function KitchenLayout() {
                   onMove={handleMove}
                   onMoveMultiple={handleMoveMultiple}
                   onResize={handleResize}
-                  onDragStart={handleDragStart}
-                  onDragEnd={handleDragEnd}
-                  onResizeStart={handleResizeStart}
-                  onResizeEnd={handleResizeEnd}
                 />
               );
             })}
