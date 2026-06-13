@@ -30,8 +30,16 @@ function rotateEquip(e: Equipment, dir: 1 | -1): Equipment {
   return { ...e, rotation: next };
 }
 
-function getDispW(e: Equipment) { return (e.rotation === 90 || e.rotation === 270) ? e.depth : e.width; }
-function getDispH(e: Equipment) { return (e.rotation === 90 || e.rotation === 270) ? e.width : e.depth; }
+function getDispW(e: Equipment) {
+  const dw = e.displayWidth ?? e.width;
+  const dh = e.displayHeight ?? e.depth;
+  return (e.rotation === 90 || e.rotation === 270) ? dh : dw;
+}
+function getDispH(e: Equipment) {
+  const dw = e.displayWidth ?? e.width;
+  const dh = e.displayHeight ?? e.depth;
+  return (e.rotation === 90 || e.rotation === 270) ? dw : dh;
+}
 
 // 浮動小数誤差の許容幅: 接触・微小ギャップを「重ならない」と判定するため
 const EPS = 0.01;
@@ -193,7 +201,12 @@ export default function KitchenLayout() {
 
   // ── equipment handlers ────────────────────────────────────────────────────
   const handleAdd = useCallback((type: EquipmentType, width: number, depth: number) => {
-    const item: Equipment = { id: genId(), type, name: type, x: 100, y: 100, width, depth, rotation: 0, memo: '' };
+    const item: Equipment = {
+      id: genId(), type, name: type, x: 100, y: 100,
+      width, depth,
+      displayWidth: width, displayHeight: depth,
+      rotation: 0, memo: '',
+    };
     setEquipments((prev) => [...prev, item]);
     setSelectedIds(new Set([item.id]));
   }, [setEquipments]);
@@ -249,18 +262,19 @@ export default function KitchenLayout() {
     setEquipments((prev) => prev.map((e) => e.id === updated.id ? updated : e));
   }, [setEquipments]);
 
-  const handleResize = useCallback((id: string, width: number, depth: number) => {
+  const handleResize = useCallback((id: string, dw: number, dh: number) => {
     const snap = (v: number) => snapEquipGridRef.current ? Math.round(v / 10) * 10 : v;
-    const sw = snap(width), sd = snap(depth);
+    const sw = snap(dw), sh = snap(dh);
     setEquipments((prev) => {
       const item = prev.find(e => e.id === id);
       if (item) {
+        const testItem = { ...item, displayWidth: sw, displayHeight: sh };
         const others = prev.filter(e => e.id !== id);
         if (!others.some(o => equipmentOverlap(item, o))) {
-          if (others.some(o => equipmentOverlap({ ...item, width: sw, depth: sd }, o))) return prev;
+          if (others.some(o => equipmentOverlap(testItem, o))) return prev;
         }
       }
-      return prev.map((e) => e.id === id ? { ...e, width: sw, depth: sd } : e);
+      return prev.map((e) => e.id === id ? { ...e, displayWidth: sw, displayHeight: sh } : e);
     });
   }, [setEquipments]);
 
@@ -707,6 +721,7 @@ export default function KitchenLayout() {
         id: genId(), type: mappingItem.type, name: resolvedName,
         x, y,
         width: Math.round(w), depth: Math.round(d),
+        displayWidth: Math.round(w), displayHeight: Math.round(d),
         widthMm: effectiveWidthMm, depthMm: effectiveDepthMm,
         rotation: 0, memo: '',
       };
@@ -766,7 +781,9 @@ export default function KitchenLayout() {
   const buildPresetEquipments = (preset: KitchenPreset): Equipment[] =>
     preset.items.map((item) => ({
       id: genId(), type: item.type, name: item.name,
-      x: item.x, y: item.y, width: item.width, depth: item.depth,
+      x: item.x, y: item.y,
+      width: item.width, depth: item.depth,
+      displayWidth: item.width, displayHeight: item.depth,
       widthMm: item.widthMm, depthMm: item.depthMm,
       rotation: item.rotation, memo: item.memo ?? '',
     }));
@@ -838,13 +855,13 @@ export default function KitchenLayout() {
     }
   }, [scalePoint1, canvasZoom, updateProject]);
 
-  // 全アイテムに実寸を反映
+  // 全アイテムに実寸を反映（displayWidth / displayHeight のみ更新）
   const handleApplyRealDimsAll = useCallback(() => {
     const scale = currentProject?.scalePxPerMm;
     if (!scale) return;
     setEquipments((prev) => prev.map((eq) => {
       if (eq.widthMm != null && eq.depthMm != null) {
-        return { ...eq, width: Math.round(eq.widthMm * scale), depth: Math.round(eq.depthMm * scale) };
+        return { ...eq, displayWidth: Math.round(eq.widthMm * scale), displayHeight: Math.round(eq.depthMm * scale) };
       }
       return eq;
     }));
@@ -854,7 +871,11 @@ export default function KitchenLayout() {
   const handleApplyRealDimsSingle = useCallback((item: Equipment) => {
     const scale = currentProject?.scalePxPerMm;
     if (!scale || item.widthMm == null || item.depthMm == null) return;
-    handleUpdate({ ...item, width: Math.round(item.widthMm * scale), depth: Math.round(item.depthMm * scale) });
+    handleUpdate({
+      ...item,
+      displayWidth: Math.round(item.widthMm * scale),
+      displayHeight: Math.round(item.depthMm * scale),
+    });
   }, [currentProject?.scalePxPerMm, handleUpdate]);
 
   // ── export ────────────────────────────────────────────────────────────────

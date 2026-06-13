@@ -38,9 +38,11 @@ export default function EquipmentItem({
     dir: 'right' | 'bottom' | 'corner';
   } | null>(null);
 
+  const equipDispW = equipment.displayWidth ?? equipment.width;
+  const equipDispH = equipment.displayHeight ?? equipment.depth;
   const isRotated = equipment.rotation === 90 || equipment.rotation === 270;
-  const displayWidth = isRotated ? equipment.depth : equipment.width;
-  const displayHeight = isRotated ? equipment.width : equipment.depth;
+  const displayWidth = isRotated ? equipDispH : equipDispW;
+  const displayHeight = isRotated ? equipDispW : equipDispH;
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (resizeStart.current) return;
@@ -88,7 +90,8 @@ export default function EquipmentItem({
     onSelectItem(equipment.id, false);
     resizeStart.current = {
       mouseX: e.clientX, mouseY: e.clientY,
-      width: equipment.width, depth: equipment.depth,
+      width: equipment.displayWidth ?? equipment.width,
+      depth: equipment.displayHeight ?? equipment.depth,
       rotation: equipment.rotation,
       dir,
     };
@@ -182,9 +185,11 @@ export default function EquipmentItem({
         </span>
         {!smallBox && (
           <span style={{ fontSize: Math.max(8, 10 * canvasScale), color: '#444', textAlign: 'center', lineHeight: 1.3 }}>
-            {equipment.widthMm != null && equipment.depthMm != null
-              ? `${equipment.widthMm} × ${equipment.depthMm} mm`
-              : `${equipment.width} × ${equipment.depth} px`}
+            {equipment.widthCm != null && equipment.depthCm != null
+              ? `${equipment.widthCm} × ${equipment.depthCm} cm`
+              : equipment.widthMm != null && equipment.depthMm != null
+                ? `${equipment.widthMm} × ${equipment.depthMm} mm`
+                : `${equipDispW} × ${equipDispH} px`}
           </span>
         )}
       </div>

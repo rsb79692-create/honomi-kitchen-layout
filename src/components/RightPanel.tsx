@@ -27,6 +27,8 @@ export default function RightPanel({
 }: Props) {
   const [localName, setLocalName] = useState('');
   const [localMemo, setLocalMemo] = useState('');
+  const [localWidthCm, setLocalWidthCm] = useState('');
+  const [localDepthCm, setLocalDepthCm] = useState('');
   const [localWidthMm, setLocalWidthMm] = useState('');
   const [localDepthMm, setLocalDepthMm] = useState('');
 
@@ -34,6 +36,8 @@ export default function RightPanel({
     if (equipment) {
       setLocalName(equipment.name);
       setLocalMemo(equipment.memo);
+      setLocalWidthCm(equipment.widthCm != null ? String(equipment.widthCm) : '');
+      setLocalDepthCm(equipment.depthCm != null ? String(equipment.depthCm) : '');
       setLocalWidthMm(equipment.widthMm != null ? String(equipment.widthMm) : '');
       setLocalDepthMm(equipment.depthMm != null ? String(equipment.depthMm) : '');
     }
@@ -122,11 +126,40 @@ export default function RightPanel({
       <label style={labelStyle}>名前</label>
       <input style={inputStyle} value={localName} onChange={(e) => setLocalName(e.target.value)} onBlur={() => handleUpdate({ name: localName })} />
 
-      <label style={labelStyle}>幅 (cm)</label>
-      <input type="number" style={inputStyle} value={equipment.width} min={10} max={500} onChange={(e) => handleUpdate({ width: Number(e.target.value) })} />
+      <label style={labelStyle}>幅 (cm) <span style={{ color: '#999', fontWeight: 400 }}>— 実寸メモ</span></label>
+      <input
+        type="number"
+        style={inputStyle}
+        value={localWidthCm}
+        min={1}
+        max={2000}
+        placeholder="例: 77"
+        onChange={(e) => setLocalWidthCm(e.target.value)}
+        onBlur={() => {
+          const v = parseFloat(localWidthCm);
+          handleUpdate({ widthCm: isNaN(v) || v <= 0 ? undefined : v });
+        }}
+      />
 
-      <label style={labelStyle}>奥行 (cm)</label>
-      <input type="number" style={inputStyle} value={equipment.depth} min={10} max={500} onChange={(e) => handleUpdate({ depth: Number(e.target.value) })} />
+      <label style={labelStyle}>奥行 (cm) <span style={{ color: '#999', fontWeight: 400 }}>— 実寸メモ</span></label>
+      <input
+        type="number"
+        style={inputStyle}
+        value={localDepthCm}
+        min={1}
+        max={2000}
+        placeholder="例: 75"
+        onChange={(e) => setLocalDepthCm(e.target.value)}
+        onBlur={() => {
+          const v = parseFloat(localDepthCm);
+          handleUpdate({ depthCm: isNaN(v) || v <= 0 ? undefined : v });
+        }}
+      />
+
+      <label style={labelStyle}>図面表示サイズ <span style={{ color: '#999', fontWeight: 400 }}>— 図面上のドラッグ/リサイズで変更</span></label>
+      <div style={{ fontSize: 12, color: '#555', marginBottom: 10, padding: '4px 6px', background: '#eee', borderRadius: 3, border: '1px solid #ddd' }}>
+        W: {equipment.displayWidth ?? equipment.width} × H: {equipment.displayHeight ?? equipment.depth} px
+      </div>
 
       <label style={labelStyle}>回転</label>
       <select style={inputStyle} value={equipment.rotation} onChange={(e) => handleUpdate({ rotation: Number(e.target.value) as 0 | 90 | 180 | 270 })}>
