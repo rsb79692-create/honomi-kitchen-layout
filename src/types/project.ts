@@ -1,5 +1,6 @@
 import type { Equipment } from './equipment';
 import type { KitchenLine } from './kitchenLine';
+import type { KitchenPolyline } from './kitchenPolyline';
 import type { CatalogItem } from './catalog';
 
 export interface CropRegion {
@@ -21,6 +22,7 @@ export interface Project {
   equipmentListCrop?: CropRegion;
   equipments: Equipment[];
   kitchenLines: KitchenLine[];
+  kitchenPolylines?: KitchenPolyline[];
   showPdf: boolean;
   showEquipmentList: boolean;
   canvasZoom: number; // 0.5 – 2.0、10% 刻み

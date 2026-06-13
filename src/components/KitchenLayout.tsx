@@ -3,6 +3,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import type { Equipment, EquipmentType } from '@/types/equipment';
 import type { KitchenLine } from '@/types/kitchenLine';
+import type { KitchenPolyline } from '@/types/kitchenPolyline';
 import type { CropRegion } from '@/types/project';
 import { useProjects } from '@/hooks/useProjects';
 import { ASTERA_PRESET } from '@/data/presets';
@@ -11,7 +12,8 @@ import type { CatalogItem } from '@/types/catalog';
 import { ASTERA_CATALOG_DEFAULT, catalogDisplayName } from '@/data/catalog';
 import EquipmentItem from './EquipmentItem';
 import KitchenLineEditor from './KitchenLineEditor';
-import LeftPanel from './LeftPanel';
+import KitchenPolylineEditor from './KitchenPolylineEditor';
+import LeftPanel, { type LeftPanelMode } from './LeftPanel';
 import MappingPanel from './MappingPanel';
 import RightPanel, { type AlignMode } from './RightPanel';
 import EquipmentListPanel from './EquipmentListPanel';
@@ -55,6 +57,7 @@ export default function KitchenLayout() {
   // Derive project fields
   const equipments: Equipment[] = currentProject?.equipments ?? [];
   const kitchenLines: KitchenLine[] = currentProject?.kitchenLines ?? [];
+  const kitchenPolylines: KitchenPolyline[] = currentProject?.kitchenPolylines ?? [];
   const showPdf: boolean = currentProject?.showPdf ?? true;
   const showEquipmentList: boolean = currentProject?.showEquipmentList ?? false;
   const canvasZoom: number = currentProject?.canvasZoom ?? 1.0;
@@ -62,7 +65,11 @@ export default function KitchenLayout() {
   // Local UI state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [pdfSize, setPdfSize] = useState<{ w: number; h: number } | null>(null);
-  const [isEditingOutline, setIsEditingOutline] = useState(false);
+  const [leftPanelMode, setLeftPanelMode] = useState<LeftPanelMode>('equipment');
+  // isEditingOutline は leftPanelMode から派生 — 二重管理を排除
+  const isEditingOutline = leftPanelMode === 'outline';
+  const [selectedPolylineId, setSelectedPolylineId] = useState<string | null>(null);
+  const [polylineUndoStack, setPolylineUndoStack] = useState<KitchenPolyline[][]>([]);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [currentStrokeWidth, setCurrentStrokeWidth] = useState(2);
   const [currentColor, setCurrentColor] = useState('#1a1a1a');
@@ -127,7 +134,6 @@ export default function KitchenLayout() {
     if (currentProject?.id !== prevProjectId.current) {
       prevProjectId.current = currentProject?.id;
       setSelectedIds(new Set());
-      setIsEditingOutline(false);
       setSelectedLineId(null);
       setUndoStack([]);
       setPdfSize(null);
@@ -140,6 +146,9 @@ export default function KitchenLayout() {
       setMappedNumbers(new Set());
       setMappingDrag(null);
       setShowCatalogModal(false);
+      setLeftPanelMode('equipment');
+      setSelectedPolylineId(null);
+      setPolylineUndoStack([]);
     }
   }, [currentProject?.id]);
 
@@ -153,6 +162,12 @@ export default function KitchenLayout() {
   const setKitchenLines = useCallback((fn: KitchenLine[] | ((prev: KitchenLine[]) => KitchenLine[])) => {
     updateProject((prev) => ({
       kitchenLines: typeof fn === 'function' ? fn(prev.kitchenLines) : fn,
+    }));
+  }, [updateProject]);
+
+  const setKitchenPolylines = useCallback((fn: KitchenPolyline[] | ((prev: KitchenPolyline[]) => KitchenPolyline[])) => {
+    updateProject((prev) => ({
+      kitchenPolylines: typeof fn === 'function' ? fn(prev.kitchenPolylines ?? []) : fn,
     }));
   }, [updateProject]);
 
@@ -442,6 +457,12 @@ export default function KitchenLayout() {
     });
   }, [setKitchenLines]);
 
+  const handleClearKitchenLines = useCallback(() => {
+    setUndoStack((prev) => [...prev, kitchenLines]);
+    setKitchenLines([]);
+    setSelectedLineId(null);
+  }, [kitchenLines, setKitchenLines]);
+
   const handleStrokeWidthChange = useCallback((w: number) => {
     setCurrentStrokeWidth(w);
     if (selectedLineId) setKitchenLines((prev) => prev.map((l) => l.id === selectedLineId ? { ...l, strokeWidth: w } : l));
@@ -451,6 +472,50 @@ export default function KitchenLayout() {
     setCurrentColor(c);
     if (selectedLineId) setKitchenLines((prev) => prev.map((l) => l.id === selectedLineId ? { ...l, color: c } : l));
   }, [selectedLineId, setKitchenLines]);
+
+  // ── polyline handlers ─────────────────────────────────────────────────────
+  const kitchenPolylinesRef = useRef<KitchenPolyline[]>(kitchenPolylines);
+  useEffect(() => { kitchenPolylinesRef.current = kitchenPolylines; }, [kitchenPolylines]);
+
+  const handleAddPolyline = useCallback((pl: KitchenPolyline) => {
+    setPolylineUndoStack((prev) => [...prev.slice(-9), kitchenPolylinesRef.current]);
+    setKitchenPolylines((prev) => [...prev, pl]);
+  }, [setKitchenPolylines]);
+
+  const handleDeletePolyline = useCallback((id: string) => {
+    setPolylineUndoStack((prev) => [...prev.slice(-9), kitchenPolylinesRef.current]);
+    setKitchenPolylines((prev) => prev.filter((p) => p.id !== id));
+    setSelectedPolylineId(null);
+  }, [setKitchenPolylines]);
+
+  const handleUpdatePolylinePoints = useCallback((id: string, points: { x: number; y: number }[]) => {
+    setKitchenPolylines((prev) => prev.map((p) => p.id === id ? { ...p, points } : p));
+  }, [setKitchenPolylines]);
+
+  const handleBeginPolylineEdit = useCallback(() => {
+    setPolylineUndoStack((prev) => [...prev.slice(-9), kitchenPolylinesRef.current]);
+  }, []);
+
+  const handlePolylineUndo = useCallback(() => {
+    setPolylineUndoStack((prev) => {
+      if (prev.length === 0) return prev;
+      const restored = prev[prev.length - 1];
+      setKitchenPolylines(restored);
+      return prev.slice(0, -1);
+    });
+  }, [setKitchenPolylines]);
+
+  const handleLeftPanelModeChange = useCallback((mode: LeftPanelMode) => {
+    setLeftPanelMode(mode);
+    if (mode === 'polyline') {
+      // isEditingOutline は leftPanelMode === 'outline' の派生値 — setLeftPanelMode で自動解消
+      setSelectedIds(new Set());
+      setSelectedLineId(null);
+      setSelectedPolylineId(null);
+    } else {
+      setSelectedPolylineId(null);
+    }
+  }, []);
 
   // Ctrl+Z for undo in outline edit mode
   const handleUndoRef = useRef(handleUndo);
@@ -469,16 +534,28 @@ export default function KitchenLayout() {
   const handleDeleteSelectedRef = useRef(handleDeleteSelected);
   const handleRotateRightRef = useRef(handleRotateRight);
   const handleRotateLeftRef = useRef(handleRotateLeft);
+  const handlePolylineUndoRef = useRef(handlePolylineUndo);
   useEffect(() => { handleEquipUndoRef.current = handleEquipUndo; }, [handleEquipUndo]);
   useEffect(() => { handleDeleteSelectedRef.current = handleDeleteSelected; }, [handleDeleteSelected]);
   useEffect(() => { handleRotateRightRef.current = handleRotateRight; }, [handleRotateRight]);
   useEffect(() => { handleRotateLeftRef.current = handleRotateLeft; }, [handleRotateLeft]);
+  useEffect(() => { handlePolylineUndoRef.current = handlePolylineUndo; }, [handlePolylineUndo]);
+  const leftPanelModeRef = useRef(leftPanelMode);
+  useEffect(() => { leftPanelModeRef.current = leftPanelMode; }, [leftPanelMode]);
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement ||
           e.target instanceof HTMLTextAreaElement ||
           e.target instanceof HTMLSelectElement) return;
       if (isEditingOutline) return;
+      // polyline mode: KitchenPolylineEditor handles Delete/Esc/Enter internally
+      if (leftPanelModeRef.current === 'polyline') {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+          e.preventDefault();
+          handlePolylineUndoRef.current();
+        }
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault();
         handleEquipUndoRef.current();
@@ -498,7 +575,7 @@ export default function KitchenLayout() {
 
   // ── Shift+ドラッグ範囲選択 ───────────────────────────────────────────────
   const handleCanvasBgMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (isEditingOutline || isSettingScale || isMappingMode) return;
+    if (isEditingOutline || isSettingScale || isMappingMode || leftPanelModeRef.current === 'polyline') return;
     if (!e.shiftKey) {
       setSelectedIds(new Set());
       return;
@@ -1007,15 +1084,6 @@ export default function KitchenLayout() {
 
         <div style={{ width: 1, height: 18, background: '#444' }} />
 
-        <button
-          onClick={() => { setIsEditingOutline((v) => !v); setSelectedLineId(null); }}
-          style={btnStyle(isEditingOutline, '#f59e0b')}
-        >
-          厨房枠編集{isEditingOutline ? ' ON' : ''}
-        </button>
-
-        <div style={{ width: 1, height: 18, background: '#444' }} />
-
         {/* 厨房図面ズームコントロール */}
         <span style={{ fontSize: 11, color: '#aaa' }}>図面ズーム:</span>
         <button
@@ -1055,7 +1123,7 @@ export default function KitchenLayout() {
         {/* 縮尺設定 */}
         <button
           onClick={() => {
-            setIsEditingOutline(false);
+            if (isEditingOutline) setLeftPanelMode('equipment');
             setIsSettingScale((v) => !v);
             setScalePoint1(null);
           }}
@@ -1186,36 +1254,39 @@ export default function KitchenLayout() {
         </div>
       )}
 
-      {/* ── Outline edit toolbar ──────────────────────────────────────────── */}
-      {isEditingOutline && (
-        <div style={{ background: '#fefce8', borderBottom: '1px solid #fde047', padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0, fontSize: 12, color: '#713f12', flexWrap: 'wrap' }}>
-          <span>クリックで線開始 → 次クリックで確定 ／ Shift=水平/垂直 ／ Esc=ｷｬﾝｾﾙ ／ Delete=削除</span>
+      {/* ── Polyline draw toolbar ────────────────────────────────────────── */}
+      {leftPanelMode === 'polyline' && (
+        <div style={{ background: '#ecfdf5', borderBottom: '1px solid #6ee7b7', padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0, fontSize: 12, color: '#065f46', flexWrap: 'wrap' }}>
+          <span>厨房枠線: クリック→頂点追加 ／ Enter or ダブルクリック→確定 ／ Shift=水平/垂直 ／ Esc=キャンセル ／ Delete=削除</span>
           <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             太さ:
-            <select value={currentStrokeWidth} onChange={(e) => handleStrokeWidthChange(Number(e.target.value))} style={{ padding: '2px 4px', fontSize: 12 }}>
+            <select value={currentStrokeWidth} onChange={(e) => setCurrentStrokeWidth(Number(e.target.value))} style={{ padding: '2px 4px', fontSize: 12 }}>
               {[1, 2, 3, 4, 5].map((w) => <option key={w} value={w}>{w}px</option>)}
             </select>
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             色:
-            <input type="color" value={currentColor} onChange={(e) => handleColorChange(e.target.value)} style={{ width: 30, height: 20, padding: 0, border: '1px solid #bbb', cursor: 'pointer' }} />
+            <input type="color" value={currentColor} onChange={(e) => setCurrentColor(e.target.value)} style={{ width: 30, height: 20, padding: 0, border: '1px solid #bbb', cursor: 'pointer' }} />
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
             <input type="checkbox" checked={snapToGrid} onChange={(e) => setSnapToGrid(e.target.checked)} />
             グリッドスナップ
           </label>
-          <button onClick={handleUndo} disabled={undoStack.length === 0}
-            style={{ padding: '2px 8px', fontSize: 12, cursor: undoStack.length === 0 ? 'default' : 'pointer', opacity: undoStack.length === 0 ? 0.5 : 1 }}>
-            Undo
+          <button onClick={handlePolylineUndo} disabled={polylineUndoStack.length === 0}
+            style={{ padding: '2px 8px', fontSize: 12, cursor: polylineUndoStack.length === 0 ? 'default' : 'pointer', opacity: polylineUndoStack.length === 0 ? 0.5 : 1 }}>
+            Undo ({polylineUndoStack.length})
           </button>
-          {selectedLineId && (
-            <button onClick={() => handleDeleteLine(selectedLineId)}
+          {selectedPolylineId && (
+            <button onClick={() => handleDeletePolyline(selectedPolylineId)}
               style={{ padding: '2px 8px', fontSize: 12, background: '#fee2e2', border: '1px solid #f87171', color: '#b91c1c', cursor: 'pointer', borderRadius: 3 }}>
-              選択線を削除
+              選択を削除
             </button>
           )}
         </div>
       )}
+
+      {/* ── Outline edit toolbar (旧 kitchenLine 1辺モード) — 停止済み ──── */}
+      {/* {isEditingOutline && (...)} — polyline に一本化のため非表示 */}
 
       {/* ── Main area ─────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
@@ -1233,7 +1304,16 @@ export default function KitchenLayout() {
             onExit={handleStopMapping}
           />
         ) : (
-          <LeftPanel onAdd={handleAdd} />
+          <LeftPanel
+            mode={leftPanelMode}
+            onModeChange={(m) => {
+              setLeftPanelMode(m);
+            }}
+            onAdd={handleAdd}
+            polylineCount={kitchenPolylines.length}
+            oldLineCount={kitchenLines.length}
+            onClearOldLines={handleClearKitchenLines}
+          />
         )}
 
         {/* Canvas */}
@@ -1269,7 +1349,7 @@ export default function KitchenLayout() {
               width={canvasW}
               height={canvasH}
               zoom={canvasZoom}
-              editMode={isEditingOutline}
+              editMode={false /* 旧描画停止: polyline に一本化 */}
               snapToGrid={snapToGrid}
               strokeWidth={currentStrokeWidth}
               color={currentColor}
@@ -1301,6 +1381,23 @@ export default function KitchenLayout() {
                 />
               );
             })}
+
+            <KitchenPolylineEditor
+              polylines={kitchenPolylines}
+              width={canvasW}
+              height={canvasH}
+              zoom={canvasZoom}
+              isActive={leftPanelMode === 'polyline'}
+              snapToGrid={snapToGrid}
+              strokeWidth={currentStrokeWidth}
+              color={currentColor}
+              selectedId={selectedPolylineId}
+              onSelect={setSelectedPolylineId}
+              onAdd={handleAddPolyline}
+              onDelete={handleDeletePolyline}
+              onUpdatePoints={handleUpdatePolylinePoints}
+              onBeginEdit={handleBeginPolylineEdit}
+            />
 
             {/* 縮尺測定 SVG オーバーレイ */}
             {isSettingScale && (
